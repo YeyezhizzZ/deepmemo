@@ -3,6 +3,7 @@ import type {
   ApiFileReference,
   ApiFileMoveResponse,
   ApiFileWriteResponse,
+  ApiChatToolResponse,
   ApiCitationsResponse,
   ApiFsNode,
   ApiMessageResponse,
@@ -10,6 +11,8 @@ import type {
   ApiSyncStatusResponse,
   AutoDraftResponse,
   FileReference,
+  ChatTool,
+  ChatToolSelection,
   ChatMessage,
   Citation,
   FsNode,
@@ -98,6 +101,28 @@ function mapFsNode(node: ApiFsNode): FsNode {
   };
 }
 
+function mapChatTool(tool: ApiChatToolResponse): ChatTool {
+  return {
+    id: tool.id,
+    name: tool.name,
+    description: tool.description,
+    executionType: tool.execution_type,
+  };
+}
+
+function buildChatBody(sessionId: string, userMessage: string, tool?: ChatToolSelection): string {
+  return JSON.stringify({
+    session_id: sessionId,
+    user_message: userMessage,
+    tool: tool
+      ? {
+          tool_id: tool.toolId,
+          scope: tool.scope ?? 'next_message',
+        }
+      : undefined,
+  });
+}
+
 export async function getHealth(): Promise<{ message: string }> {
   return request<{ message: string }>('/');
 }
@@ -126,13 +151,19 @@ export async function listMessages(sessionId: string): Promise<ChatMessage[]> {
   return messages.map(mapMessage);
 }
 
-export async function sendMessage(sessionId: string, userMessage: string): Promise<ChatMessage> {
+export async function getChatTools(): Promise<ChatTool[]> {
+  const tools = await request<ApiChatToolResponse[]>('/chat/tools');
+  return tools.map(mapChatTool);
+}
+
+export async function sendMessage(
+  sessionId: string,
+  userMessage: string,
+  tool?: ChatToolSelection,
+): Promise<ChatMessage> {
   const message = await request<ApiMessageResponse>('/chat', {
     method: 'POST',
-    body: JSON.stringify({
-      session_id: sessionId,
-      user_message: userMessage,
-    }),
+    body: buildChatBody(sessionId, userMessage, tool),
   });
   return mapMessage(message);
 }
@@ -140,17 +171,15 @@ export async function sendMessage(sessionId: string, userMessage: string): Promi
 export async function sendMessageStream(
   sessionId: string,
   userMessage: string,
-  onChunk: (token: string) => void
+  onChunk: (token: string) => void,
+  tool?: ChatToolSelection,
 ): Promise<ChatMessage | undefined> {
   const response = await fetch(buildRequestUrl('/chat/stream'), {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
     },
-    body: JSON.stringify({
-      session_id: sessionId,
-      user_message: userMessage,
-    }),
+    body: buildChatBody(sessionId, userMessage, tool),
   });
 
   if (!response.ok) {

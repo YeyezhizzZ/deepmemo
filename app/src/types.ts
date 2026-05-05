@@ -23,6 +23,20 @@ export type Citation = {
 
 export type SyncStatus = 'synced' | 'dirty' | 'draft' | 'processing' | 'error';
 
+export type ChatToolExecutionType = 'inline' | 'job';
+
+export type ChatTool = {
+  id: string;
+  name: string;
+  description: string;
+  executionType: ChatToolExecutionType;
+};
+
+export type ChatToolSelection = {
+  toolId: string;
+  scope?: 'next_message' | 'session';
+};
+
 export type FsNode = {
   id: string;
   name: string;
@@ -61,6 +75,13 @@ export type ApiCitationsResponse = {
 };
 
 export type ApiSyncStatus = SyncStatus;
+
+export type ApiChatToolResponse = {
+  id: string;
+  name: string;
+  description: string;
+  execution_type: ChatToolExecutionType;
+};
 
 export type ApiFsNode = {
   name: string;

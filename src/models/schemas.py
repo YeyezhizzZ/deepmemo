@@ -28,6 +28,19 @@ class SessionResponse(BaseModel):
     updated_at: datetime
 
 
+class ChatToolSelection(BaseModel):
+    tool_id: str
+    scope: str = "next_message"
+
+
+class ChatToolResponse(BaseModel):
+    id: str
+    name: str
+    description: str
+    execution_type: str
+
+
 class ChatRequest(BaseModel):
     session_id: str
     user_message: str
+    tool: Optional[ChatToolSelection] = None

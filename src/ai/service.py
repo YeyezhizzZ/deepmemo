@@ -1,4 +1,5 @@
 from src.ai.answer_composer import AnswerComposer
+from src.ai.chat_tools import ChatTool
 from src.ai.local_search_agent import LocalSearchAgent
 from src.ai.query_router import QueryRouter
 from src.ai.types import KnowledgeAnswer, KnowledgeAnswerStream
@@ -20,7 +21,13 @@ class KnowledgeQAService:
         self.web_search_agent = web_search_agent or WebSearchAgent(enabled=False)
         self.answer_composer = answer_composer or AnswerComposer(llm_service)
 
-    def answer(self, question: str, *, history: list[dict] | None = None) -> KnowledgeAnswer:
+    def answer(
+        self,
+        question: str,
+        *,
+        history: list[dict] | None = None,
+        tool: ChatTool | None = None,
+    ) -> KnowledgeAnswer:
         route = self.router.route(question)
         local_result = self.local_search_agent.search(question, route=route)
 
@@ -34,6 +41,7 @@ class KnowledgeQAService:
             route,
             history=history,
             web_result=web_result,
+            tool=tool,
         )
         return KnowledgeAnswer(
             content=content,
@@ -42,7 +50,13 @@ class KnowledgeQAService:
             web_result=web_result,
         )
 
-    def answer_stream(self, question: str, *, history: list[dict] | None = None) -> KnowledgeAnswerStream:
+    def answer_stream(
+        self,
+        question: str,
+        *,
+        history: list[dict] | None = None,
+        tool: ChatTool | None = None,
+    ) -> KnowledgeAnswerStream:
         route = self.router.route(question)
         local_result = self.local_search_agent.search(question, route=route)
 
@@ -56,6 +70,7 @@ class KnowledgeQAService:
             route,
             history=history,
             web_result=web_result,
+            tool=tool,
         )
         return KnowledgeAnswerStream(
             chunks=chunks,

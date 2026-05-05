@@ -4,9 +4,10 @@ from datetime import datetime
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
+from src.ai.chat_tools import ChatTool, UnknownChatToolError, get_chat_tool, list_chat_tools
 from src.ai.service import knowledge_qa_service
 from src.app.database import get_db_connection
-from src.models.schemas import ChatRequest, MessageResponse
+from src.models.schemas import ChatRequest, ChatToolResponse, MessageResponse
 
 router = APIRouter(prefix="/chat", tags=["chat"])
 
@@ -76,8 +77,33 @@ def build_llm_messages(session_id: str) -> list[dict]:
     return messages
 
 
+def resolve_chat_tool(request: ChatRequest) -> ChatTool | None:
+    if not request.tool:
+        return None
+    if request.tool.scope != "next_message":
+        raise HTTPException(status_code=400, detail="当前仅支持 next_message 工具作用域")
+    try:
+        return get_chat_tool(request.tool.tool_id)
+    except UnknownChatToolError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.get("/tools", response_model=list[ChatToolResponse])
+def get_tools():
+    return [
+        ChatToolResponse(
+            id=tool.id,
+            name=tool.name,
+            description=tool.description,
+            execution_type=tool.execution_type,
+        )
+        for tool in list_chat_tools()
+    ]
+
+
 @router.post("/", response_model=MessageResponse)
 def chat(request: ChatRequest):
+    selected_tool = resolve_chat_tool(request)
     session = get_session_row(request.session_id)
     message_ids = json.loads(session["message_ids"])
     llm_messages = build_llm_messages(request.session_id)
@@ -86,7 +112,7 @@ def chat(request: ChatRequest):
     save_message(user_msg_id, request.session_id, "user", request.user_message)
     message_ids.append(user_msg_id)
 
-    answer = knowledge_qa_service.answer(request.user_message, history=llm_messages)
+    answer = knowledge_qa_service.answer(request.user_message, history=llm_messages, tool=selected_tool)
     ai_content = answer.content
     citations = build_message_citations(answer)
 
@@ -108,6 +134,7 @@ def chat(request: ChatRequest):
 @router.post("/stream")
 async def chat_stream(request: ChatRequest):
     """SSE 流式聊天端点"""
+    selected_tool = resolve_chat_tool(request)
     session = get_session_row(request.session_id)
     message_ids = json.loads(session["message_ids"])
     llm_messages = build_llm_messages(request.session_id)
@@ -120,7 +147,11 @@ async def chat_stream(request: ChatRequest):
     async def event_generator():
         full_content = ""
         try:
-            answer = knowledge_qa_service.answer_stream(request.user_message, history=llm_messages)
+            answer = knowledge_qa_service.answer_stream(
+                request.user_message,
+                history=llm_messages,
+                tool=selected_tool,
+            )
             for chunk in answer.chunks:
                 full_content += chunk
                 yield format_sse_event({"type": "token", "content": chunk})

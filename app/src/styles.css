@@ -708,6 +708,45 @@ button:disabled {
   white-space: nowrap;
 }
 
+.ai-command-bar__tool-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding-bottom: 8px;
+}
+
+.tool-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 100%;
+  min-height: 26px;
+  border: 1px solid #b8cbe0;
+  border-radius: 6px;
+  background: #eef6ff;
+  color: #14304f;
+  padding: 0 4px 0 9px;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.tool-chip button {
+  display: inline-grid;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: #45627f;
+  padding: 0;
+}
+
+.tool-chip button:hover {
+  background: #dbeafe;
+  color: var(--primary);
+}
+
 .ai-command-bar__box {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
@@ -743,6 +782,78 @@ button:disabled {
   display: flex;
   align-items: flex-end;
   gap: 8px;
+}
+
+.tool-picker {
+  position: relative;
+  display: inline-flex;
+}
+
+.tool-picker__menu {
+  position: absolute;
+  right: 0;
+  bottom: 40px;
+  z-index: 20;
+  display: grid;
+  gap: 6px;
+  width: min(320px, calc(100vw - 32px));
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: #fff;
+  padding: 8px;
+  box-shadow: 0 14px 34px rgba(23, 32, 51, 0.18);
+}
+
+.tool-picker__item {
+  display: grid !important;
+  grid-template-columns: minmax(0, 1fr);
+  justify-items: stretch !important;
+  gap: 4px !important;
+  width: 100%;
+  height: auto;
+  min-height: 62px !important;
+  border-color: transparent !important;
+  padding: 9px 10px !important;
+  text-align: left;
+  white-space: normal !important;
+}
+
+.tool-picker__item:hover,
+.tool-picker__item--active {
+  border-color: #b8cbe0 !important;
+  background: #f3f8ff !important;
+}
+
+.tool-picker__item span {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  min-width: 0;
+}
+
+.tool-picker__item strong {
+  min-width: 0;
+  overflow: hidden;
+  color: #172033;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tool-picker__item small {
+  flex: 0 0 auto;
+  border: 1px solid #cbd7e6;
+  border-radius: 6px;
+  color: #4c5f77;
+  padding: 1px 6px;
+  font-size: 11px;
+}
+
+.tool-picker__item em {
+  color: var(--muted);
+  font-size: 12px;
+  font-style: normal;
+  line-height: 1.45;
 }
 
 .send-button {

@@ -30,6 +30,8 @@ import {
   Trash2,
   UserRound,
   WandSparkles,
+  Wrench,
+  X,
 } from 'lucide-react';
 import {
   createDiaryAutoDraft,
@@ -41,6 +43,7 @@ import {
   getFileReferences,
   getFileTree,
   getHealth,
+  getChatTools,
   getMessageCitations,
   listMessages,
   listSessions,
@@ -50,7 +53,7 @@ import {
   updateFileSyncStatus,
   writeFile,
 } from './api';
-import type { ChatMessage, Citation, FileReference, FsNode, Session, SyncStatus } from './types';
+import type { ChatMessage, ChatTool, Citation, FileReference, FsNode, Session, SyncStatus } from './types';
 
 const exampleQuestions = [
   'DeepMemo 的产品想法是什么？',
@@ -910,6 +913,11 @@ function AiCommandBar({
   onSubmit,
   onAutoDraft,
   onRefactor,
+  tools,
+  selectedToolId,
+  toolsLoading,
+  onSelectTool,
+  onClearTool,
   loading,
   draftLoading,
   disabled,
@@ -921,12 +929,20 @@ function AiCommandBar({
   onSubmit: () => void;
   onAutoDraft: () => void;
   onRefactor: () => void;
+  tools: ChatTool[];
+  selectedToolId?: string;
+  toolsLoading: boolean;
+  onSelectTool: (toolId: string) => void;
+  onClearTool: () => void;
   loading: boolean;
   draftLoading: boolean;
   disabled: boolean;
   activeSession?: Session;
   contextPaths: string[];
 }) {
+  const [toolMenuOpen, setToolMenuOpen] = useState(false);
+  const selectedTool = tools.find((tool) => tool.id === selectedToolId);
+
   return (
     <form
       className="ai-command-bar"
@@ -942,6 +958,17 @@ function AiCommandBar({
         </span>
         <span>{activeSession?.sessionName ?? '未选择会话'}</span>
       </div>
+      {selectedTool && (
+        <div className="ai-command-bar__tool-row">
+          <span className="tool-chip" title={selectedTool.description}>
+            <Wrench size={13} />
+            {selectedTool.name}
+            <button type="button" onClick={onClearTool} title="移除工具">
+              <X size={13} />
+            </button>
+          </span>
+        </div>
+      )}
       <div className="ai-command-bar__box">
         <textarea
           value={value}
@@ -951,6 +978,39 @@ function AiCommandBar({
           disabled={disabled}
         />
         <div className="ai-command-bar__actions">
+          <div className="tool-picker">
+            <button
+              type="button"
+              onClick={() => setToolMenuOpen((open) => !open)}
+              disabled={disabled || toolsLoading || tools.length === 0}
+              aria-expanded={toolMenuOpen}
+              title="工具"
+            >
+              <Wrench size={16} />
+              工具
+            </button>
+            {toolMenuOpen && (
+              <div className="tool-picker__menu">
+                {tools.map((tool) => (
+                  <button
+                    className={tool.id === selectedToolId ? 'tool-picker__item tool-picker__item--active' : 'tool-picker__item'}
+                    type="button"
+                    key={tool.id}
+                    onClick={() => {
+                      onSelectTool(tool.id);
+                      setToolMenuOpen(false);
+                    }}
+                  >
+                    <span>
+                      <strong>{tool.name}</strong>
+                      <small>{tool.executionType === 'job' ? '任务' : '即时'}</small>
+                    </span>
+                    <em>{tool.description}</em>
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
           <button type="button" onClick={onAutoDraft} disabled={draftLoading}>
             <WandSparkles size={16} />
             Auto-Draft
@@ -984,6 +1044,9 @@ function HybridWorkspace({
   creating,
   deleting,
   contextPaths,
+  tools,
+  selectedToolId,
+  toolsLoading,
   entityOptions,
   activeMessageId,
   activeCitationIndex,
@@ -998,6 +1061,8 @@ function HybridWorkspace({
   onSubmit,
   onAutoDraft,
   onRefactor,
+  onSelectTool,
+  onClearTool,
   onActivateMessage,
   onCitationHover,
 }: {
@@ -1015,6 +1080,9 @@ function HybridWorkspace({
   creating: boolean;
   deleting: boolean;
   contextPaths: string[];
+  tools: ChatTool[];
+  selectedToolId?: string;
+  toolsLoading: boolean;
   entityOptions: string[];
   activeMessageId?: string;
   activeCitationIndex?: number;
@@ -1029,6 +1097,8 @@ function HybridWorkspace({
   onSubmit: () => void;
   onAutoDraft: () => void;
   onRefactor: () => void;
+  onSelectTool: (toolId: string) => void;
+  onClearTool: () => void;
   onActivateMessage: (message: ChatMessage) => void;
   onCitationHover: (index?: number) => void;
 }) {
@@ -1077,6 +1147,11 @@ function HybridWorkspace({
           onSubmit={onSubmit}
           onAutoDraft={onAutoDraft}
           onRefactor={onRefactor}
+          tools={tools}
+          selectedToolId={selectedToolId}
+          toolsLoading={toolsLoading}
+          onSelectTool={onSelectTool}
+          onClearTool={onClearTool}
           loading={loading}
           draftLoading={streaming}
           disabled={booting || !activeSessionId}
@@ -1413,6 +1488,9 @@ export function App() {
   const [sessions, setSessions] = useState<Session[]>([]);
   const [activeSessionId, setActiveSessionId] = useState<string>();
   const [messages, setMessages] = useState<ChatMessage[]>([]);
+  const [chatTools, setChatTools] = useState<ChatTool[]>([]);
+  const [toolsLoading, setToolsLoading] = useState(false);
+  const [selectedToolId, setSelectedToolId] = useState<string>();
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
   const [booting, setBooting] = useState(true);
@@ -1521,6 +1599,24 @@ export function App() {
 
   useEffect(() => {
     let cancelled = false;
+
+    setToolsLoading(true);
+    getChatTools()
+      .then((tools) => {
+        if (!cancelled) {
+          setChatTools(tools);
+        }
+      })
+      .catch((caught) => {
+        if (!cancelled) {
+          setError(caught instanceof Error ? caught.message : '工具列表加载失败');
+        }
+      })
+      .finally(() => {
+        if (!cancelled) {
+          setToolsLoading(false);
+        }
+      });
 
     async function boot() {
       setBooting(true);
@@ -1750,6 +1846,9 @@ export function App() {
     if (!trimmed || loading || !activeSessionId) return;
 
     const sessionId = activeSessionId;
+    const outgoingToolId = selectedToolId && chatTools.some((tool) => tool.id === selectedToolId)
+      ? selectedToolId
+      : undefined;
     const optimisticUser = createOptimisticUserMessage(sessionId, trimmed);
     const tempAssistantId = `local-assistant-${Date.now()}`;
     const optimisticAssistant: ChatMessage = {
@@ -1767,22 +1866,28 @@ export function App() {
 
     setMode('qa');
     setInput('');
+    setSelectedToolId(undefined);
     setLoading(true);
     setError(undefined);
     setMessages((current) => [...current, optimisticUser, optimisticAssistant]);
 
     const streamedContent: string[] = [];
     try {
-      const savedAssistant = await sendMessageStream(sessionId, trimmed, (token) => {
-        streamedContent.push(token);
-        setMessages((current) =>
-          current.map((msg) =>
-            msg.id === tempAssistantId
-              ? { ...msg, content: streamedContent.join('') }
-              : msg
-          )
-        );
-      });
+      const savedAssistant = await sendMessageStream(
+        sessionId,
+        trimmed,
+        (token) => {
+          streamedContent.push(token);
+          setMessages((current) =>
+            current.map((msg) =>
+              msg.id === tempAssistantId
+                ? { ...msg, content: streamedContent.join('') }
+                : msg
+            )
+          );
+        },
+        outgoingToolId ? { toolId: outgoingToolId, scope: 'next_message' } : undefined,
+      );
 
       if (savedAssistant) {
         setMessages((current) =>
@@ -2075,6 +2180,9 @@ export function App() {
           creating={creating}
           deleting={deleting}
           contextPaths={contextPaths}
+          tools={chatTools}
+          selectedToolId={selectedToolId}
+          toolsLoading={toolsLoading}
           entityOptions={entityOptions}
           activeMessageId={activeMessageId}
           activeCitationIndex={activeCitationIndex}
@@ -2089,6 +2197,8 @@ export function App() {
           onSubmit={() => submitQuestion()}
           onAutoDraft={handleAutoDraft}
           onRefactor={handleRefactor}
+          onSelectTool={setSelectedToolId}
+          onClearTool={() => setSelectedToolId(undefined)}
           onActivateMessage={handleActivateMessage}
           onCitationHover={setActiveCitationIndex}
         />
