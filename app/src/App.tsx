@@ -23,7 +23,6 @@ import {
   MoreHorizontal,
   Network,
   RefreshCw,
-  Search,
   Send,
   Settings,
   Sparkles,
@@ -250,23 +249,6 @@ function deriveEntityOptions(nodes: FileNode[], content: string): string[] {
   return Array.from(new Set([...wikiLinks, ...fileNames])).slice(0, 12);
 }
 
-function filterTree(nodes: FileNode[], query: string): FileNode[] {
-  const normalized = query.trim().toLowerCase();
-  if (!normalized) return nodes;
-
-  return nodes.flatMap((node) => {
-    const selfMatches = `${node.name} ${node.path}`.toLowerCase().includes(normalized);
-    if (node.type === 'file') {
-      return selfMatches ? [node] : [];
-    }
-    const children = filterTree(node.children ?? [], normalized);
-    if (selfMatches || children.length > 0) {
-      return [{ ...node, children }];
-    }
-    return [];
-  });
-}
-
 function formatEditorMarkdown(value: string): string {
   return value
     .split('\n')
@@ -317,14 +299,10 @@ function StatusDot({ status }: { status?: SyncStatus }) {
 function DataExplorer({
   files,
   activeFileId,
-  searchQuery,
   expanded,
-  contextPaths,
   refreshing,
-  onSearchChange,
   onSelectFile,
   onToggleFolder,
-  onUseAsContext,
   onRenameNode,
   onCreateFile,
   onCreateFolder,
@@ -332,21 +310,16 @@ function DataExplorer({
 }: {
   files: FileNode[];
   activeFileId?: string;
-  searchQuery: string;
   expanded: Set<string>;
-  contextPaths: string[];
   refreshing: boolean;
-  onSearchChange: (value: string) => void;
   onSelectFile: (id: string) => void;
   onToggleFolder: (id: string) => void;
-  onUseAsContext: (node: FileNode) => void;
   onRenameNode: (node: FileNode) => void;
   onCreateFile: () => void;
   onCreateFolder: () => void;
   onRefresh: () => void;
 }) {
   const counts = useMemo(() => countNodes(files), [files]);
-  const visibleFiles = useMemo(() => filterTree(files, searchQuery), [files, searchQuery]);
 
   return (
     <aside className="data-explorer">
@@ -357,16 +330,6 @@ function DataExplorer({
             <div className="brand__name">DeepMemo</div>
             <div className="brand__env">Agent Workspace</div>
           </div>
-        </div>
-
-        <div className="search-box">
-          <Search size={15} />
-          <input
-            value={searchQuery}
-            onChange={(event) => onSearchChange(event.target.value)}
-            placeholder="搜索 data/"
-            aria-label="搜索 data"
-          />
         </div>
       </div>
 
@@ -385,17 +348,15 @@ function DataExplorer({
       </div>
 
       <nav className="file-tree" aria-label="data 文件树">
-        {visibleFiles.map((node) => (
+        {files.map((node) => (
           <FileTreeNode
             key={node.id}
             node={node}
             level={0}
             activeFileId={activeFileId}
             expanded={expanded}
-            contextPaths={contextPaths}
             onSelectFile={onSelectFile}
             onToggleFolder={onToggleFolder}
-            onUseAsContext={onUseAsContext}
             onRenameNode={onRenameNode}
             onCreateFile={onCreateFile}
           />
@@ -429,10 +390,8 @@ function FileTreeNode({
   level,
   activeFileId,
   expanded,
-  contextPaths,
   onSelectFile,
   onToggleFolder,
-  onUseAsContext,
   onRenameNode,
   onCreateFile,
 }: {
@@ -440,17 +399,14 @@ function FileTreeNode({
   level: number;
   activeFileId?: string;
   expanded: Set<string>;
-  contextPaths: string[];
   onSelectFile: (id: string) => void;
   onToggleFolder: (id: string) => void;
-  onUseAsContext: (node: FileNode) => void;
   onRenameNode: (node: FileNode) => void;
   onCreateFile: (parentPath: string) => void;
 }) {
   const isFolder = node.type === 'directory';
   const isExpanded = expanded.has(node.id);
   const isActive = node.id === activeFileId;
-  const inContext = contextPaths.includes(node.path);
 
   const handleClick = () => {
     if (isFolder) {
@@ -478,7 +434,6 @@ function FileTreeNode({
           <FileText className="file-node__icon" size={16} />
         )}
         <span className="file-node__name">{node.name}</span>
-        {inContext && <AtSign className="file-node__context" size={13} />}
         {!isFolder && <StatusDot status={node.syncStatus} />}
         <span className="file-node__hover-actions">
           <span role="button" tabIndex={-1} title="新建文件" onClick={(event) => {
@@ -487,14 +442,6 @@ function FileTreeNode({
           }}>
             <FilePlus2 size={13} />
           </span>
-          {isFolder && (
-            <span role="button" tabIndex={-1} title="以此为 AI 上下文" onClick={(event) => {
-              event.stopPropagation();
-              onUseAsContext(node);
-            }}>
-              <Bot size={13} />
-            </span>
-          )}
         </span>
       </button>
       {isFolder && isExpanded && (
@@ -506,10 +453,8 @@ function FileTreeNode({
               level={level + 1}
               activeFileId={activeFileId}
               expanded={expanded}
-              contextPaths={contextPaths}
               onSelectFile={onSelectFile}
               onToggleFolder={onToggleFolder}
-              onUseAsContext={onUseAsContext}
               onRenameNode={onRenameNode}
               onCreateFile={onCreateFile}
             />
@@ -922,7 +867,6 @@ function AiCommandBar({
   draftLoading,
   disabled,
   activeSession,
-  contextPaths,
 }: {
   value: string;
   onChange: (value: string) => void;
@@ -938,7 +882,6 @@ function AiCommandBar({
   draftLoading: boolean;
   disabled: boolean;
   activeSession?: Session;
-  contextPaths: string[];
 }) {
   const [toolMenuOpen, setToolMenuOpen] = useState(false);
   const selectedTool = tools.find((tool) => tool.id === selectedToolId);
@@ -954,7 +897,7 @@ function AiCommandBar({
       <div className="ai-command-bar__meta">
         <span>
           <Sparkles size={14} />
-          正在基于 {contextPaths.length > 0 ? contextPaths.join('、') : 'diary/ 和 skills.db'} 提供建议
+          正在基于本地知识库提供建议
         </span>
         <span>{activeSession?.sessionName ?? '未选择会话'}</span>
       </div>
@@ -1043,7 +986,6 @@ function HybridWorkspace({
   booting,
   creating,
   deleting,
-  contextPaths,
   tools,
   selectedToolId,
   toolsLoading,
@@ -1079,7 +1021,6 @@ function HybridWorkspace({
   booting: boolean;
   creating: boolean;
   deleting: boolean;
-  contextPaths: string[];
   tools: ChatTool[];
   selectedToolId?: string;
   toolsLoading: boolean;
@@ -1156,7 +1097,6 @@ function HybridWorkspace({
           draftLoading={streaming}
           disabled={booting || !activeSessionId}
           activeSession={activeSession}
-          contextPaths={contextPaths}
         />
       )}
     </section>
@@ -1498,13 +1438,11 @@ export function App() {
   const [creating, setCreating] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [error, setError] = useState<string>();
-  const [searchQuery, setSearchQuery] = useState('');
   const [files, setFiles] = useState<FileNode[]>([]);
   const [activeFileId, setActiveFileId] = useState<string>();
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [mode, setMode] = useState<WorkspaceMode>('editor');
   const [fileContents, setFileContents] = useState<Record<string, string>>({});
-  const [contextPaths, setContextPaths] = useState<string[]>(['diary', 'ideas']);
   const [drafting, setDrafting] = useState(false);
   const [saving, setSaving] = useState(false);
   const [activeMessageId, setActiveMessageId] = useState<string>();
@@ -1939,13 +1877,6 @@ export function App() {
     setMode('editor');
   };
 
-  const handleUseAsContext = (node: FileNode) => {
-    setContextPaths((current) => {
-      if (current.includes(node.path)) return current;
-      return [...current.slice(-2), node.path];
-    });
-  };
-
   const handleActivateMessage = (message: ChatMessage) => {
     setActiveMessageId(message.id);
   };
@@ -2090,7 +2021,7 @@ export function App() {
 
   const handleAiComplete = () => {
     requestEditorAi(
-      `请基于当前文件 ${activeFile?.path ?? '未选择文件'} 和上下文 ${contextPaths.join('、')}，补完下面的 Markdown，不要编造未给出的事实：\n\n${editorValue}`,
+      `请基于当前文件 ${activeFile?.path ?? '未选择文件'}，补完下面的 Markdown，不要编造未给出的事实：\n\n${editorValue}`,
       'AI 补完',
     );
   };
@@ -2134,14 +2065,10 @@ export function App() {
       <DataExplorer
         files={files}
         activeFileId={activeFileId}
-        searchQuery={searchQuery}
         expanded={expanded}
-        contextPaths={contextPaths}
         refreshing={refreshing}
-        onSearchChange={setSearchQuery}
         onSelectFile={handleSelectFile}
         onToggleFolder={handleToggleFolder}
-        onUseAsContext={handleUseAsContext}
         onRenameNode={handleRenameNode}
         onCreateFile={handleCreateFile}
         onCreateFolder={handleCreateFolder}
@@ -2179,7 +2106,6 @@ export function App() {
           booting={booting}
           creating={creating}
           deleting={deleting}
-          contextPaths={contextPaths}
           tools={chatTools}
           selectedToolId={selectedToolId}
           toolsLoading={toolsLoading}
