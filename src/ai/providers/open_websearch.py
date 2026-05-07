@@ -11,6 +11,7 @@ Usage:
 
 import asyncio
 import json
+import os
 from pathlib import Path
 
 from mcp.client.stdio import StdioServerParameters, stdio_client
@@ -20,7 +21,10 @@ from mcp.client.session import ClientSession
 def _get_open_websearch_path() -> str:
     """Get the absolute path to the Open-WebSearch build index.js"""
     repo_root = Path(__file__).parent.parent.parent.parent
-    return str(repo_root / "reference" / "open-webSearch" / "build" / "index.js")
+    open_websearch_path = repo_root / "reference" / "open-webSearch" / "build" / "index.js"
+    if not open_websearch_path.exists():
+        raise FileNotFoundError(f"Open-WebSearch build file not found: {open_websearch_path}")
+    return str(open_websearch_path)
 
 
 async def mcp_search_async(
@@ -43,7 +47,7 @@ async def mcp_search_async(
     server_params = StdioServerParameters(
         command="node",
         args=[open_websearch_path],
-        env={"MODE": "stdio"},
+        env={**os.environ, "MODE": "stdio"},
     )
 
     async with stdio_client(server_params) as (read_stream, write_stream):

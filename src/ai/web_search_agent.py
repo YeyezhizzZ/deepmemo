@@ -1,30 +1,33 @@
-"""
-WebSearch Agent - 集成网页搜索、提取、爬取、站点图功能。
-
-当前支持的 provider:
-  - Tavily: 配置于 `config/llm_api.yaml` 的 `tavily.api_key`
-
-启用方式: 初始化时传入 provider 函数
-示例:
-    from src.ai.providers.tavily import create_tavily_provider
-    agent = WebSearchAgent(enabled=True, provider=create_tavily_provider())
-"""
-
 import asyncio
-from collections.abc import Callable, Coroutine
+import threading
+from collections.abc import Awaitable, Callable
+from pathlib import Path
 
 import yaml
-from pathlib import Path
 
 from src.ai.types import WebSearchResult, WebExtractResult, WebCrawlResult, WebMapResult
 
 
+SearchProvider = Callable[[str], list[str]]
+AsyncSearchProvider = Callable[[str], Awaitable[list[str]]]
+
+
+def _repo_root() -> Path:
+    return Path(__file__).resolve().parents[2]
+
+
+def _load_yaml_config(path: Path) -> dict:
+    if not path.exists():
+        return {}
+    with open(path) as f:
+        return yaml.safe_load(f) or {}
+
+
 def load_tavily_config() -> dict:
-    """从 config/llm_api.yaml 加载 Tavily 配置"""
-    config_file = Path(__file__).parent.parent.parent / "config" / "llm_api.yaml"
-    with open(config_file) as f:
-        cfg = yaml.safe_load(f)
-    return cfg.get("tavily", {})
+    """加载 Tavily 配置，兼容旧的 llm_api.yaml 和新的 web_search.yaml。"""
+    legacy_config = _load_yaml_config(_repo_root() / "config" / "llm_api.yaml").get("tavily", {})
+    web_config = load_web_search_config().get("tavily", {})
+    return {**(legacy_config or {}), **(web_config or {})}
 
 
 def create_tavily_provider():
@@ -34,7 +37,7 @@ def create_tavily_provider():
     config = load_tavily_config()
     api_key = config.get("api_key")
     if not api_key:
-        raise ValueError("Tavily API key 未配置，请检查 config/llm_api.yaml")
+        raise ValueError("Tavily API key 未配置，请检查 config/web_search.yaml 或 config/llm_api.yaml")
 
     client = TavilyClient(api_key=api_key)
 
@@ -57,12 +60,14 @@ class WebSearchAgent:
         self,
         *,
         enabled: bool = False,
-        provider: Callable[[str], list[str]] | None = None,
-        async_provider: Callable[[str], Coroutine] | None = None,
+        provider: SearchProvider | None = None,
+        async_provider: AsyncSearchProvider | None = None,
+        provider_error: str | None = None,
     ):
         self.enabled = enabled
         self.provider = provider
         self.async_provider = async_provider
+        self.provider_error = provider_error
 
     def search(self, query: str) -> WebSearchResult:
         """网页搜索，返回文本片段列表"""
@@ -73,6 +78,13 @@ class WebSearchAgent:
                 message="WebSearchAgent 已预留接口，但当前 MVP 默认禁用联网搜索。",
             )
 
+        if self.provider_error:
+            return WebSearchResult(
+                enabled=True,
+                used=False,
+                message=self.provider_error,
+            )
+
         if not self.provider and not self.async_provider:
             return WebSearchResult(
                 enabled=True,
@@ -80,10 +92,19 @@ class WebSearchAgent:
                 message="WebSearchAgent 已启用，但尚未配置具体 web search provider。",
             )
 
-        if self.async_provider:
-            snippets = asyncio.run(self.async_provider(query))
-        else:
-            snippets = self.provider(query)
+        try:
+            if self.async_provider:
+                snippets = self._run_async_provider(query)
+            elif self.provider:
+                snippets = self.provider(query)
+            else:
+                snippets = []
+        except Exception as exc:
+            return WebSearchResult(
+                enabled=True,
+                used=False,
+                message=f"外部搜索 provider 执行失败：{exc}",
+            )
 
         return WebSearchResult(
             enabled=True,
@@ -91,6 +112,33 @@ class WebSearchAgent:
             snippets=snippets,
             message=None if snippets else "外部搜索没有返回可用结果。",
         )
+
+    def _run_async_provider(self, query: str) -> list[str]:
+        if not self.async_provider:
+            return []
+
+        try:
+            asyncio.get_running_loop()
+        except RuntimeError:
+            return asyncio.run(self.async_provider(query))
+
+        result: list[str] = []
+        error: BaseException | None = None
+
+        def runner() -> None:
+            nonlocal result, error
+            try:
+                result = asyncio.run(self.async_provider(query))
+            except BaseException as exc:
+                error = exc
+
+        thread = threading.Thread(target=runner, daemon=True)
+        thread.start()
+        thread.join()
+
+        if error:
+            raise error
+        return result
 
     def extract(self, urls: str | list[str]) -> WebExtractResult:
         """从指定 URL 提取网页内容"""
@@ -183,26 +231,44 @@ class WebSearchAgent:
 
 def load_web_search_config() -> dict:
     """从 config/web_search.yaml 加载配置"""
-    config_file = Path(__file__).parent.parent.parent / "config" / "web_search.yaml"
-    with open(config_file) as f:
-        return yaml.safe_load(f)
+    return _load_yaml_config(_repo_root() / "config" / "web_search.yaml")
 
 
 def create_enabled_web_agent():
     """创建启用状态的 WebSearchAgent（根据 config 选择 provider）"""
     cfg = load_web_search_config()
+    if not cfg.get("enabled", False):
+        return WebSearchAgent(enabled=False)
+
     provider_name = cfg.get("provider", "disabled")
 
     if provider_name == "open_websearch":
-        from src.ai.providers.open_websearch import mcp_search_async
+        try:
+            from src.ai.providers.open_websearch import mcp_search_async
+        except ModuleNotFoundError as exc:
+            if exc.name != "mcp":
+                raise
+            return WebSearchAgent(
+                enabled=True,
+                provider_error="Open-WebSearch provider 缺少 Python 依赖 `mcp`，请运行 `uv add mcp` 后重启后端，或在 config/web_search.yaml 中禁用 web search。",
+            )
+
+        provider_config = cfg.get("open_websearch", {}) or {}
+        engines = provider_config.get("engines") or None
+        limit = int(provider_config.get("limit", 10))
+
+        async def provider(query: str) -> list[str]:
+            return await mcp_search_async(query, engines=engines, limit=limit)
+
         return WebSearchAgent(
             enabled=True,
-            async_provider=mcp_search_async,
+            async_provider=provider,
         )
     elif provider_name == "tavily":
-        return WebSearchAgent(
-            enabled=True,
-            provider=create_tavily_provider(),
-        )
+        try:
+            provider = create_tavily_provider()
+        except (ModuleNotFoundError, ValueError) as exc:
+            return WebSearchAgent(enabled=True, provider_error=str(exc))
+        return WebSearchAgent(enabled=True, provider=provider)
     else:
         return WebSearchAgent(enabled=False)
