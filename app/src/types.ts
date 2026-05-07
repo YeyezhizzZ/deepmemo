@@ -43,6 +43,7 @@ export type FsNode = {
   path: string;
   type: 'file' | 'directory';
   syncStatus: SyncStatus;
+  modifiedAt?: string;
   children?: FsNode[];
 };
 
@@ -88,6 +89,7 @@ export type ApiFsNode = {
   path: string;
   type: 'file' | 'directory';
   sync_status: ApiSyncStatus;
+  modified?: string;
   children?: ApiFsNode[];
 };
 

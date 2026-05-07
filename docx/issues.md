@@ -174,3 +174,24 @@ MVP 使用 `inline`，搜索结果直接参与本轮回答。
 
 **决策人**: gzy
 **状态**: 已确认 MVP 方案，待实现
+
+
+## 9. 近期待办搜索不到
+
+**问题描述**: 问答模式检索不到最近的笔记文件，搜索结果总是不包含刚写的内容。
+
+**可能原因**:
+- 已确认根因是 `rg` 目录搜索结果依赖文件系统/遍历顺序，不保证最近日记优先。
+- `LocalSearchAgent` 收集到 `max_evidence` 后会提前停止；旧文件先命中时，`56.md`、`55.md`、`54.md` 这类最近文件可能排不到证据列表前面。
+
+**处理方式**:
+- `src/ai/local_tools.py`：目录搜索时先枚举 Markdown 文件，再按 `diary/<月日>.md` 倒序逐文件调用 `rg`；顺序为 `56.md -> 55.md -> 54.md -> 430.md`。
+- `src/ai/local_search_agent.py`：无直接命中时的最近文件 fallback 也改为按日记日期倒序读取。
+
+**涉及位置**:
+- `src/ai/local_tools.py` - `grep_content` / `files_with_matches` / `count` 的受控搜索顺序
+- `src/ai/local_search_agent.py` - scoped fallback 的最近文件选择
+
+**决策人**: gzy
+**状态**: 已修复
+

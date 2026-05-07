@@ -106,7 +106,7 @@ class LocalSearchAgent:
         evidence: list[Evidence] = []
         for path in path_hints:
             files = sorted(self.tools.glob_files(path).files, key=self._fallback_sort_key)
-            for file_path in files[-3:]:
+            for file_path in files[-3:][::-1]:
                 if len(evidence) >= min(3, self.max_evidence):
                     return evidence
                 read_result = self.tools.read_lines(file_path, 1, 40)
@@ -125,11 +125,35 @@ class LocalSearchAgent:
                 )
         return evidence
 
-    def _fallback_sort_key(self, file_path: str) -> tuple[int, int | str]:
+    def _fallback_sort_key(self, file_path: str) -> tuple[int, int, int, str]:
         stem = Path(file_path).stem
-        if stem.isdigit():
-            return (1, int(stem))
-        return (0, file_path)
+        diary_date = self._diary_filename_date(file_path)
+        if diary_date:
+            month, day = diary_date
+            return (1, month, day, file_path)
+        return (0, 0, 0, file_path)
+
+    def _diary_filename_date(self, file_path: str) -> tuple[int, int] | None:
+        path = Path(file_path)
+        if not path.parts or path.parts[0] != "diary":
+            return None
+
+        stem = path.stem
+        if not stem.isdigit() or len(stem) < 2:
+            return None
+        if len(stem) == 2:
+            month = int(stem[0])
+            day = int(stem[1])
+        elif len(stem) == 3:
+            month = int(stem[0])
+            day = int(stem[1:])
+        else:
+            month = int(stem[:-2])
+            day = int(stem[-2:])
+
+        if 1 <= month <= 12 and 1 <= day <= 31:
+            return month, day
+        return None
 
     def _score_hit(self, hit: GrepHit, query: str) -> float:
         haystack = "\n".join(

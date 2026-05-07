@@ -97,6 +97,7 @@ function mapFsNode(node: ApiFsNode): FsNode {
     path: node.path,
     type: node.type,
     syncStatus: node.sync_status,
+    modifiedAt: node.modified,
     children: node.children?.map(mapFsNode),
   };
 }
