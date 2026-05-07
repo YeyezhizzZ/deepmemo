@@ -40,6 +40,8 @@ class SessionResponse(BaseModel):
     session_id: str
     session_name: str
     message_ids: list[str]
+    session_topic: str = ""
+    session_summary: str = ""
     created_at: datetime
     updated_at: datetime
 
@@ -157,6 +159,8 @@ def create_session(data: SessionCreate):
         session_id=session_id,
         session_name=data.session_name,
         message_ids=[],
+        session_topic="",
+        session_summary="",
         created_at=datetime.fromisoformat(now),
         updated_at=datetime.fromisoformat(now),
     )
@@ -173,6 +177,8 @@ def list_sessions():
             session_id=row["session_id"],
             session_name=row["session_name"],
             message_ids=json.loads(row["message_ids"]),
+            session_topic=row["session_topic"] or "",
+            session_summary=row["session_summary"] or "",
             created_at=datetime.fromisoformat(row["created_at"]),
             updated_at=datetime.fromisoformat(row["updated_at"]),
         )
@@ -187,6 +193,8 @@ def get_session(session_id: str):
         session_id=row["session_id"],
         session_name=row["session_name"],
         message_ids=json.loads(row["message_ids"]),
+        session_topic=row["session_topic"] or "",
+        session_summary=row["session_summary"] or "",
         created_at=datetime.fromisoformat(row["created_at"]),
         updated_at=datetime.fromisoformat(row["updated_at"]),
     )

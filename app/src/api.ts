@@ -66,6 +66,8 @@ export function mapSession(session: ApiSessionResponse): Session {
     sessionId: session.session_id,
     sessionName: session.session_name,
     messageIds: session.message_ids,
+    sessionTopic: session.session_topic,
+    sessionSummary: session.session_summary,
     createdAt: formatTime(session.created_at),
     updatedAt: formatTime(session.updated_at),
   };

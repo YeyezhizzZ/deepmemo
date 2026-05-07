@@ -133,10 +133,20 @@ class WebMapResult:
 
 
 @dataclass
+class QueryRewriteResult:
+    original_question: str
+    rewritten_query: str
+    changed: bool = False
+    reason: str | None = None
+
+
+@dataclass
 class KnowledgeAnswer:
     content: str
     route: RouteDecision
     local_result: LocalSearchResult
+    retrieval_query: str | None = None
+    rewrite_changed: bool = False
     web_result: WebSearchResult | None = None
 
 
@@ -145,4 +155,6 @@ class KnowledgeAnswerStream:
     chunks: Iterator[str]
     route: RouteDecision
     local_result: LocalSearchResult
+    retrieval_query: str | None = None
+    rewrite_changed: bool = False
     web_result: WebSearchResult | None = None

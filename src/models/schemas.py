@@ -24,6 +24,8 @@ class SessionResponse(BaseModel):
     session_id: str
     session_name: str
     message_ids: list[str]
+    session_topic: str = ""
+    session_summary: str = ""
     created_at: datetime
     updated_at: datetime
 

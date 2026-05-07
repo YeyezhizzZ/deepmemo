@@ -2,6 +2,8 @@ export type Session = {
   sessionId: string;
   sessionName: string;
   messageIds: string[];
+  sessionTopic?: string;
+  sessionSummary?: string;
   createdAt: string;
   updatedAt: string;
 };
@@ -51,6 +53,8 @@ export type ApiSessionResponse = {
   session_id: string;
   session_name: string;
   message_ids: string[];
+  session_topic?: string;
+  session_summary?: string;
   created_at: string;
   updated_at: string;
 };
