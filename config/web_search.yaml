@@ -1,0 +1,13 @@
+# Web Search Configuration
+# Used by src/ai/web_search_agent.py to select and configure the search provider
+
+enabled: true
+provider: "open_websearch"  # Options: "open_websearch", "tavily", "disabled"
+
+open_websearch:
+  engines:
+    - "bing"
+  limit: 10
+
+tavily:
+  api_key: ""  # Set your Tavily API key here if using tavily provider

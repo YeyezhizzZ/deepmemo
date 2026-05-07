@@ -10,7 +10,8 @@ WebSearch Agent - 集成网页搜索、提取、爬取、站点图功能。
     agent = WebSearchAgent(enabled=True, provider=create_tavily_provider())
 """
 
-from collections.abc import Callable
+import asyncio
+from collections.abc import Callable, Coroutine
 
 import yaml
 from pathlib import Path
@@ -57,9 +58,11 @@ class WebSearchAgent:
         *,
         enabled: bool = False,
         provider: Callable[[str], list[str]] | None = None,
+        async_provider: Callable[[str], Coroutine] | None = None,
     ):
         self.enabled = enabled
         self.provider = provider
+        self.async_provider = async_provider
 
     def search(self, query: str) -> WebSearchResult:
         """网页搜索，返回文本片段列表"""
@@ -70,14 +73,18 @@ class WebSearchAgent:
                 message="WebSearchAgent 已预留接口，但当前 MVP 默认禁用联网搜索。",
             )
 
-        if not self.provider:
+        if not self.provider and not self.async_provider:
             return WebSearchResult(
                 enabled=True,
                 used=False,
                 message="WebSearchAgent 已启用，但尚未配置具体 web search provider。",
             )
 
-        snippets = self.provider(query)
+        if self.async_provider:
+            snippets = asyncio.run(self.async_provider(query))
+        else:
+            snippets = self.provider(query)
+
         return WebSearchResult(
             enabled=True,
             used=bool(snippets),
@@ -174,9 +181,28 @@ class WebSearchAgent:
         )
 
 
+def load_web_search_config() -> dict:
+    """从 config/web_search.yaml 加载配置"""
+    config_file = Path(__file__).parent.parent.parent / "config" / "web_search.yaml"
+    with open(config_file) as f:
+        return yaml.safe_load(f)
+
+
 def create_enabled_web_agent():
-    """创建启用状态的 WebSearchAgent（使用 Tavily provider）"""
-    return WebSearchAgent(
-        enabled=True,
-        provider=create_tavily_provider(),
-    )
+    """创建启用状态的 WebSearchAgent（根据 config 选择 provider）"""
+    cfg = load_web_search_config()
+    provider_name = cfg.get("provider", "disabled")
+
+    if provider_name == "open_websearch":
+        from src.ai.providers.open_websearch import mcp_search_async
+        return WebSearchAgent(
+            enabled=True,
+            async_provider=mcp_search_async,
+        )
+    elif provider_name == "tavily":
+        return WebSearchAgent(
+            enabled=True,
+            provider=create_tavily_provider(),
+        )
+    else:
+        return WebSearchAgent(enabled=False)

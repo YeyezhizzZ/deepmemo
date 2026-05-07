@@ -3,7 +3,7 @@ from src.ai.chat_tools import ChatTool
 from src.ai.local_search_agent import LocalSearchAgent
 from src.ai.query_router import QueryRouter
 from src.ai.types import KnowledgeAnswer, KnowledgeAnswerStream
-from src.ai.web_search_agent import WebSearchAgent
+from src.ai.web_search_agent import WebSearchAgent, create_enabled_web_agent
 from src.services.llm_service import llm_service
 
 
@@ -18,7 +18,7 @@ class KnowledgeQAService:
     ):
         self.router = router or QueryRouter()
         self.local_search_agent = local_search_agent or LocalSearchAgent()
-        self.web_search_agent = web_search_agent or WebSearchAgent(enabled=False)
+        self.web_search_agent = web_search_agent or create_enabled_web_agent()
         self.answer_composer = answer_composer or AnswerComposer(llm_service)
 
     def answer(
