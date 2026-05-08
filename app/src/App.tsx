@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import {
   AlertCircle,
   AtSign,
@@ -23,13 +23,12 @@ import {
   MoreHorizontal,
   Network,
   RefreshCw,
-  Search,
   Send,
-  Settings,
   Sparkles,
   Trash2,
-  UserRound,
   WandSparkles,
+  Wrench,
+  X,
 } from 'lucide-react';
 import {
   createDiaryAutoDraft,
@@ -41,6 +40,7 @@ import {
   getFileReferences,
   getFileTree,
   getHealth,
+  getChatTools,
   getMessageCitations,
   listMessages,
   listSessions,
@@ -50,7 +50,7 @@ import {
   updateFileSyncStatus,
   writeFile,
 } from './api';
-import type { ChatMessage, Citation, FileReference, FsNode, Session, SyncStatus } from './types';
+import type { ChatMessage, ChatTool, Citation, FileReference, FsNode, Session, SyncStatus } from './types';
 
 const exampleQuestions = [
   'DeepMemo 的产品想法是什么？',
@@ -81,6 +81,15 @@ type ParsedMarkdown = {
   bodyLines: string[];
   sources: SourceChunk[];
 };
+
+type MarkdownPreviewBlock =
+  | { type: 'blockquote'; lines: string[] }
+  | { type: 'code'; language?: string; code: string }
+  | { type: 'heading'; level: 1 | 2 | 3 | 4 | 5 | 6; text: string }
+  | { type: 'hr' }
+  | { type: 'list'; ordered: boolean; items: string[] }
+  | { type: 'paragraph'; text: string }
+  | { type: 'table'; headers: string[]; rows: string[][] };
 
 function trimTrailingBlankLines(lines: string[]): string[] {
   const next = [...lines];
@@ -247,23 +256,6 @@ function deriveEntityOptions(nodes: FileNode[], content: string): string[] {
   return Array.from(new Set([...wikiLinks, ...fileNames])).slice(0, 12);
 }
 
-function filterTree(nodes: FileNode[], query: string): FileNode[] {
-  const normalized = query.trim().toLowerCase();
-  if (!normalized) return nodes;
-
-  return nodes.flatMap((node) => {
-    const selfMatches = `${node.name} ${node.path}`.toLowerCase().includes(normalized);
-    if (node.type === 'file') {
-      return selfMatches ? [node] : [];
-    }
-    const children = filterTree(node.children ?? [], normalized);
-    if (selfMatches || children.length > 0) {
-      return [{ ...node, children }];
-    }
-    return [];
-  });
-}
-
 function formatEditorMarkdown(value: string): string {
   return value
     .split('\n')
@@ -271,6 +263,277 @@ function formatEditorMarkdown(value: string): string {
     .join('\n')
     .replace(/\n{3,}/g, '\n\n')
     .trimStart();
+}
+
+function isTableSeparator(line: string): boolean {
+  const cells = splitTableRow(line);
+  return cells.length > 1 && cells.every((cell) => /^:?-{3,}:?$/.test(cell.trim()));
+}
+
+function splitTableRow(line: string): string[] {
+  return line
+    .trim()
+    .replace(/^\|/, '')
+    .replace(/\|$/, '')
+    .split('|')
+    .map((cell) => cell.trim());
+}
+
+function isBlockStart(line: string, nextLine?: string): boolean {
+  const trimmed = line.trim();
+  return (
+    /^#{1,6}\s+/.test(trimmed)
+    || /^```/.test(trimmed)
+    || /^>\s?/.test(trimmed)
+    || /^[-*+]\s+/.test(trimmed)
+    || /^\d+\.\s+/.test(trimmed)
+    || /^(-{3,}|\*{3,}|_{3,})$/.test(trimmed)
+    || (line.includes('|') && nextLine !== undefined && isTableSeparator(nextLine))
+  );
+}
+
+function parseMarkdownPreview(content: string): MarkdownPreviewBlock[] {
+  const lines = content.replace(/\r\n/g, '\n').split('\n');
+  const blocks: MarkdownPreviewBlock[] = [];
+  let index = 0;
+
+  while (index < lines.length) {
+    const line = lines[index];
+    const trimmed = line.trim();
+    const nextLine = lines[index + 1];
+
+    if (!trimmed) {
+      index += 1;
+      continue;
+    }
+
+    if (/^```/.test(trimmed)) {
+      const language = trimmed.replace(/^```/, '').trim() || undefined;
+      const codeLines: string[] = [];
+      index += 1;
+      while (index < lines.length && !lines[index].trim().startsWith('```')) {
+        codeLines.push(lines[index]);
+        index += 1;
+      }
+      if (index < lines.length) {
+        index += 1;
+      }
+      blocks.push({ type: 'code', language, code: codeLines.join('\n') });
+      continue;
+    }
+
+    if (line.includes('|') && nextLine !== undefined && isTableSeparator(nextLine)) {
+      const headers = splitTableRow(line);
+      const rows: string[][] = [];
+      index += 2;
+      while (index < lines.length && lines[index].includes('|') && lines[index].trim()) {
+        rows.push(splitTableRow(lines[index]));
+        index += 1;
+      }
+      blocks.push({ type: 'table', headers, rows });
+      continue;
+    }
+
+    const headingMatch = /^(#{1,6})\s+(.+)$/.exec(trimmed);
+    if (headingMatch) {
+      blocks.push({
+        type: 'heading',
+        level: headingMatch[1].length as 1 | 2 | 3 | 4 | 5 | 6,
+        text: headingMatch[2],
+      });
+      index += 1;
+      continue;
+    }
+
+    if (/^(-{3,}|\*{3,}|_{3,})$/.test(trimmed)) {
+      blocks.push({ type: 'hr' });
+      index += 1;
+      continue;
+    }
+
+    if (/^>\s?/.test(trimmed)) {
+      const quoteLines: string[] = [];
+      while (index < lines.length && /^>\s?/.test(lines[index].trim())) {
+        quoteLines.push(lines[index].trim().replace(/^>\s?/, ''));
+        index += 1;
+      }
+      blocks.push({ type: 'blockquote', lines: quoteLines });
+      continue;
+    }
+
+    if (/^[-*+]\s+/.test(trimmed)) {
+      const items: string[] = [];
+      while (index < lines.length && /^[-*+]\s+/.test(lines[index].trim())) {
+        items.push(lines[index].trim().replace(/^[-*+]\s+/, ''));
+        index += 1;
+      }
+      blocks.push({ type: 'list', ordered: false, items });
+      continue;
+    }
+
+    if (/^\d+\.\s+/.test(trimmed)) {
+      const items: string[] = [];
+      while (index < lines.length && /^\d+\.\s+/.test(lines[index].trim())) {
+        items.push(lines[index].trim().replace(/^\d+\.\s+/, ''));
+        index += 1;
+      }
+      blocks.push({ type: 'list', ordered: true, items });
+      continue;
+    }
+
+    const paragraphLines: string[] = [];
+    while (
+      index < lines.length
+      && lines[index].trim()
+      && !isBlockStart(lines[index], lines[index + 1])
+    ) {
+      paragraphLines.push(lines[index].trim());
+      index += 1;
+    }
+    blocks.push({ type: 'paragraph', text: paragraphLines.join(' ') });
+  }
+
+  return blocks;
+}
+
+function renderInlineMarkdown(text: string, keyPrefix: string): ReactNode[] {
+  const pattern = /(\[[^\]]+\]\([^)]+\)|`[^`]+`|\*\*[^*]+\*\*|__[^_]+__|\*[^*\s][^*]*\*|_[^_\s][^_]*_)/g;
+  const nodes: ReactNode[] = [];
+  let lastIndex = 0;
+  let partIndex = 0;
+
+  for (const match of text.matchAll(pattern)) {
+    if (match.index === undefined) continue;
+    if (match.index > lastIndex) {
+      nodes.push(text.slice(lastIndex, match.index));
+    }
+
+    const token = match[0];
+    const key = `${keyPrefix}-${partIndex}`;
+    const linkMatch = /^\[([^\]]+)\]\(([^)]+)\)$/.exec(token);
+    if (linkMatch) {
+      const href = normalizePreviewHref(linkMatch[2]);
+      nodes.push(
+        <a href={href} target="_blank" rel="noreferrer" key={key}>
+          {linkMatch[1]}
+        </a>,
+      );
+    } else if (token.startsWith('`')) {
+      nodes.push(<code key={key}>{token.slice(1, -1)}</code>);
+    } else if (token.startsWith('**') || token.startsWith('__')) {
+      nodes.push(<strong key={key}>{token.slice(2, -2)}</strong>);
+    } else {
+      nodes.push(<em key={key}>{token.slice(1, -1)}</em>);
+    }
+
+    lastIndex = match.index + token.length;
+    partIndex += 1;
+  }
+
+  if (lastIndex < text.length) {
+    nodes.push(text.slice(lastIndex));
+  }
+
+  return nodes;
+}
+
+function normalizePreviewHref(value: string): string {
+  const href = value.trim();
+  if (/^(https?:|mailto:|#|\/)/i.test(href)) {
+    return href;
+  }
+  return '#';
+}
+
+function MarkdownPreview({ content }: { content: string }) {
+  const blocks = useMemo(() => parseMarkdownPreview(content), [content]);
+
+  if (blocks.length === 0) {
+    return (
+      <div className="markdown-preview markdown-preview--empty">
+        <span>Preview</span>
+      </div>
+    );
+  }
+
+  return (
+    <div className="markdown-preview">
+      {blocks.map((block, index) => {
+        if (block.type === 'heading') {
+          const children = renderInlineMarkdown(block.text, `heading-${index}`);
+          if (block.level === 1) return <h1 key={index}>{children}</h1>;
+          if (block.level === 2) return <h2 key={index}>{children}</h2>;
+          if (block.level === 3) return <h3 key={index}>{children}</h3>;
+          if (block.level === 4) return <h4 key={index}>{children}</h4>;
+          if (block.level === 5) return <h5 key={index}>{children}</h5>;
+          return <h6 key={index}>{children}</h6>;
+        }
+
+        if (block.type === 'paragraph') {
+          return <p key={index}>{renderInlineMarkdown(block.text, `paragraph-${index}`)}</p>;
+        }
+
+        if (block.type === 'list') {
+          const ListTag = block.ordered ? 'ol' : 'ul';
+          return (
+            <ListTag key={index}>
+              {block.items.map((item, itemIndex) => (
+                <li key={itemIndex}>{renderInlineMarkdown(item, `list-${index}-${itemIndex}`)}</li>
+              ))}
+            </ListTag>
+          );
+        }
+
+        if (block.type === 'blockquote') {
+          return (
+            <blockquote key={index}>
+              {block.lines.map((quoteLine, quoteIndex) => (
+                <p key={quoteIndex}>{renderInlineMarkdown(quoteLine, `quote-${index}-${quoteIndex}`)}</p>
+              ))}
+            </blockquote>
+          );
+        }
+
+        if (block.type === 'code') {
+          return (
+            <pre key={index}>
+              {block.language && <span className="markdown-preview__language">{block.language}</span>}
+              <code>{block.code}</code>
+            </pre>
+          );
+        }
+
+        if (block.type === 'table') {
+          return (
+            <div className="markdown-preview__table-wrap" key={index}>
+              <table>
+                <thead>
+                  <tr>
+                    {block.headers.map((header, headerIndex) => (
+                      <th key={headerIndex}>{renderInlineMarkdown(header, `table-head-${index}-${headerIndex}`)}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {block.rows.map((row, rowIndex) => (
+                    <tr key={rowIndex}>
+                      {block.headers.map((_, cellIndex) => (
+                        <td key={cellIndex}>
+                          {renderInlineMarkdown(row[cellIndex] ?? '', `table-cell-${index}-${rowIndex}-${cellIndex}`)}
+                        </td>
+                      ))}
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          );
+        }
+
+        return <hr key={index} />;
+      })}
+    </div>
+  );
 }
 
 function getMessageSources(message?: ChatMessage): SourceChunk[] {
@@ -314,14 +577,10 @@ function StatusDot({ status }: { status?: SyncStatus }) {
 function DataExplorer({
   files,
   activeFileId,
-  searchQuery,
   expanded,
-  contextPaths,
   refreshing,
-  onSearchChange,
   onSelectFile,
   onToggleFolder,
-  onUseAsContext,
   onRenameNode,
   onCreateFile,
   onCreateFolder,
@@ -329,21 +588,16 @@ function DataExplorer({
 }: {
   files: FileNode[];
   activeFileId?: string;
-  searchQuery: string;
   expanded: Set<string>;
-  contextPaths: string[];
   refreshing: boolean;
-  onSearchChange: (value: string) => void;
   onSelectFile: (id: string) => void;
   onToggleFolder: (id: string) => void;
-  onUseAsContext: (node: FileNode) => void;
   onRenameNode: (node: FileNode) => void;
   onCreateFile: () => void;
   onCreateFolder: () => void;
   onRefresh: () => void;
 }) {
   const counts = useMemo(() => countNodes(files), [files]);
-  const visibleFiles = useMemo(() => filterTree(files, searchQuery), [files, searchQuery]);
 
   return (
     <aside className="data-explorer">
@@ -354,16 +608,6 @@ function DataExplorer({
             <div className="brand__name">DeepMemo</div>
             <div className="brand__env">Agent Workspace</div>
           </div>
-        </div>
-
-        <div className="search-box">
-          <Search size={15} />
-          <input
-            value={searchQuery}
-            onChange={(event) => onSearchChange(event.target.value)}
-            placeholder="搜索 data/"
-            aria-label="搜索 data"
-          />
         </div>
       </div>
 
@@ -382,17 +626,15 @@ function DataExplorer({
       </div>
 
       <nav className="file-tree" aria-label="data 文件树">
-        {visibleFiles.map((node) => (
+        {files.map((node) => (
           <FileTreeNode
             key={node.id}
             node={node}
             level={0}
             activeFileId={activeFileId}
             expanded={expanded}
-            contextPaths={contextPaths}
             onSelectFile={onSelectFile}
             onToggleFolder={onToggleFolder}
-            onUseAsContext={onUseAsContext}
             onRenameNode={onRenameNode}
             onCreateFile={onCreateFile}
           />
@@ -407,15 +649,6 @@ function DataExplorer({
             <span>{counts.files} files · {counts.folders} folders</span>
           </div>
         </div>
-        <div className="footer-actions">
-          <button type="button" title="设置">
-            <Settings size={17} />
-          </button>
-          <button type="button" title="用户">
-            <UserRound size={17} />
-            <span>byl</span>
-          </button>
-        </div>
       </div>
     </aside>
   );
@@ -426,10 +659,8 @@ function FileTreeNode({
   level,
   activeFileId,
   expanded,
-  contextPaths,
   onSelectFile,
   onToggleFolder,
-  onUseAsContext,
   onRenameNode,
   onCreateFile,
 }: {
@@ -437,17 +668,14 @@ function FileTreeNode({
   level: number;
   activeFileId?: string;
   expanded: Set<string>;
-  contextPaths: string[];
   onSelectFile: (id: string) => void;
   onToggleFolder: (id: string) => void;
-  onUseAsContext: (node: FileNode) => void;
   onRenameNode: (node: FileNode) => void;
   onCreateFile: (parentPath: string) => void;
 }) {
   const isFolder = node.type === 'directory';
   const isExpanded = expanded.has(node.id);
   const isActive = node.id === activeFileId;
-  const inContext = contextPaths.includes(node.path);
 
   const handleClick = () => {
     if (isFolder) {
@@ -475,7 +703,6 @@ function FileTreeNode({
           <FileText className="file-node__icon" size={16} />
         )}
         <span className="file-node__name">{node.name}</span>
-        {inContext && <AtSign className="file-node__context" size={13} />}
         {!isFolder && <StatusDot status={node.syncStatus} />}
         <span className="file-node__hover-actions">
           <span role="button" tabIndex={-1} title="新建文件" onClick={(event) => {
@@ -484,14 +711,6 @@ function FileTreeNode({
           }}>
             <FilePlus2 size={13} />
           </span>
-          {isFolder && (
-            <span role="button" tabIndex={-1} title="以此为 AI 上下文" onClick={(event) => {
-              event.stopPropagation();
-              onUseAsContext(node);
-            }}>
-              <Bot size={13} />
-            </span>
-          )}
         </span>
       </button>
       {isFolder && isExpanded && (
@@ -503,10 +722,8 @@ function FileTreeNode({
               level={level + 1}
               activeFileId={activeFileId}
               expanded={expanded}
-              contextPaths={contextPaths}
               onSelectFile={onSelectFile}
               onToggleFolder={onToggleFolder}
-              onUseAsContext={onUseAsContext}
               onRenameNode={onRenameNode}
               onCreateFile={onCreateFile}
             />
@@ -629,13 +846,20 @@ function EditorContent({
         </div>
       </div>
 
-      <div className="editor-surface">
-        <textarea
-          value={value}
-          onChange={(event) => onChange(event.target.value)}
-          spellCheck={false}
-          aria-label="Markdown 编辑器"
-        />
+      <div className="editor-surface editor-surface--split">
+        <div className="editor-pane editor-pane--input">
+          <div className="editor-pane__label">Markdown</div>
+          <textarea
+            value={value}
+            onChange={(event) => onChange(event.target.value)}
+            spellCheck={false}
+            aria-label="Markdown 编辑器"
+          />
+        </div>
+        <div className="editor-pane editor-pane--preview">
+          <div className="editor-pane__label">Preview</div>
+          <MarkdownPreview content={value} />
+        </div>
         {entityMatches.length > 0 && (
           <div className="floating-menu entity-menu">
             {entityMatches.map((entity) => (
@@ -910,23 +1134,34 @@ function AiCommandBar({
   onSubmit,
   onAutoDraft,
   onRefactor,
+  tools,
+  selectedToolId,
+  toolsLoading,
+  onSelectTool,
+  onClearTool,
   loading,
   draftLoading,
   disabled,
   activeSession,
-  contextPaths,
 }: {
   value: string;
   onChange: (value: string) => void;
   onSubmit: () => void;
   onAutoDraft: () => void;
   onRefactor: () => void;
+  tools: ChatTool[];
+  selectedToolId?: string;
+  toolsLoading: boolean;
+  onSelectTool: (toolId: string) => void;
+  onClearTool: () => void;
   loading: boolean;
   draftLoading: boolean;
   disabled: boolean;
   activeSession?: Session;
-  contextPaths: string[];
 }) {
+  const [toolMenuOpen, setToolMenuOpen] = useState(false);
+  const selectedTool = tools.find((tool) => tool.id === selectedToolId);
+
   return (
     <form
       className="ai-command-bar"
@@ -938,10 +1173,21 @@ function AiCommandBar({
       <div className="ai-command-bar__meta">
         <span>
           <Sparkles size={14} />
-          正在基于 {contextPaths.length > 0 ? contextPaths.join('、') : 'diary/ 和 skills.db'} 提供建议
+          正在基于本地知识库提供建议
         </span>
         <span>{activeSession?.sessionName ?? '未选择会话'}</span>
       </div>
+      {selectedTool && (
+        <div className="ai-command-bar__tool-row">
+          <span className="tool-chip" title={selectedTool.description}>
+            <Wrench size={13} />
+            {selectedTool.name}
+            <button type="button" onClick={onClearTool} title="移除工具">
+              <X size={13} />
+            </button>
+          </span>
+        </div>
+      )}
       <div className="ai-command-bar__box">
         <textarea
           value={value}
@@ -951,6 +1197,39 @@ function AiCommandBar({
           disabled={disabled}
         />
         <div className="ai-command-bar__actions">
+          <div className="tool-picker">
+            <button
+              type="button"
+              onClick={() => setToolMenuOpen((open) => !open)}
+              disabled={disabled || toolsLoading || tools.length === 0}
+              aria-expanded={toolMenuOpen}
+              title="工具"
+            >
+              <Wrench size={16} />
+              工具
+            </button>
+            {toolMenuOpen && (
+              <div className="tool-picker__menu">
+                {tools.map((tool) => (
+                  <button
+                    className={tool.id === selectedToolId ? 'tool-picker__item tool-picker__item--active' : 'tool-picker__item'}
+                    type="button"
+                    key={tool.id}
+                    onClick={() => {
+                      onSelectTool(tool.id);
+                      setToolMenuOpen(false);
+                    }}
+                  >
+                    <span>
+                      <strong>{tool.name}</strong>
+                      <small>{tool.executionType === 'job' ? '任务' : '即时'}</small>
+                    </span>
+                    <em>{tool.description}</em>
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
           <button type="button" onClick={onAutoDraft} disabled={draftLoading}>
             <WandSparkles size={16} />
             Auto-Draft
@@ -983,7 +1262,9 @@ function HybridWorkspace({
   booting,
   creating,
   deleting,
-  contextPaths,
+  tools,
+  selectedToolId,
+  toolsLoading,
   entityOptions,
   activeMessageId,
   activeCitationIndex,
@@ -998,6 +1279,8 @@ function HybridWorkspace({
   onSubmit,
   onAutoDraft,
   onRefactor,
+  onSelectTool,
+  onClearTool,
   onActivateMessage,
   onCitationHover,
 }: {
@@ -1014,7 +1297,9 @@ function HybridWorkspace({
   booting: boolean;
   creating: boolean;
   deleting: boolean;
-  contextPaths: string[];
+  tools: ChatTool[];
+  selectedToolId?: string;
+  toolsLoading: boolean;
   entityOptions: string[];
   activeMessageId?: string;
   activeCitationIndex?: number;
@@ -1029,6 +1314,8 @@ function HybridWorkspace({
   onSubmit: () => void;
   onAutoDraft: () => void;
   onRefactor: () => void;
+  onSelectTool: (toolId: string) => void;
+  onClearTool: () => void;
   onActivateMessage: (message: ChatMessage) => void;
   onCitationHover: (index?: number) => void;
 }) {
@@ -1077,11 +1364,15 @@ function HybridWorkspace({
           onSubmit={onSubmit}
           onAutoDraft={onAutoDraft}
           onRefactor={onRefactor}
+          tools={tools}
+          selectedToolId={selectedToolId}
+          toolsLoading={toolsLoading}
+          onSelectTool={onSelectTool}
+          onClearTool={onClearTool}
           loading={loading}
           draftLoading={streaming}
           disabled={booting || !activeSessionId}
           activeSession={activeSession}
-          contextPaths={contextPaths}
         />
       )}
     </section>
@@ -1257,7 +1548,7 @@ function FileReferencesView({
                 >
                   <div className="source-card__top">
                     <span className="source-index">
-                      {ref.role === 'assistant' ? <Bot size={13} /> : <UserRound size={13} />}
+                      {ref.role === 'assistant' ? <Bot size={13} /> : <span>你</span>}
                     </span>
                     <span className="source-card__meta">
                       <span>{ref.createdAt}</span>
@@ -1413,6 +1704,9 @@ export function App() {
   const [sessions, setSessions] = useState<Session[]>([]);
   const [activeSessionId, setActiveSessionId] = useState<string>();
   const [messages, setMessages] = useState<ChatMessage[]>([]);
+  const [chatTools, setChatTools] = useState<ChatTool[]>([]);
+  const [toolsLoading, setToolsLoading] = useState(false);
+  const [selectedToolId, setSelectedToolId] = useState<string>();
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
   const [booting, setBooting] = useState(true);
@@ -1420,13 +1714,11 @@ export function App() {
   const [creating, setCreating] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [error, setError] = useState<string>();
-  const [searchQuery, setSearchQuery] = useState('');
   const [files, setFiles] = useState<FileNode[]>([]);
   const [activeFileId, setActiveFileId] = useState<string>();
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [mode, setMode] = useState<WorkspaceMode>('editor');
   const [fileContents, setFileContents] = useState<Record<string, string>>({});
-  const [contextPaths, setContextPaths] = useState<string[]>(['diary', 'ideas']);
   const [drafting, setDrafting] = useState(false);
   const [saving, setSaving] = useState(false);
   const [activeMessageId, setActiveMessageId] = useState<string>();
@@ -1521,6 +1813,24 @@ export function App() {
 
   useEffect(() => {
     let cancelled = false;
+
+    setToolsLoading(true);
+    getChatTools()
+      .then((tools) => {
+        if (!cancelled) {
+          setChatTools(tools);
+        }
+      })
+      .catch((caught) => {
+        if (!cancelled) {
+          setError(caught instanceof Error ? caught.message : '工具列表加载失败');
+        }
+      })
+      .finally(() => {
+        if (!cancelled) {
+          setToolsLoading(false);
+        }
+      });
 
     async function boot() {
       setBooting(true);
@@ -1750,6 +2060,9 @@ export function App() {
     if (!trimmed || loading || !activeSessionId) return;
 
     const sessionId = activeSessionId;
+    const outgoingToolId = selectedToolId && chatTools.some((tool) => tool.id === selectedToolId)
+      ? selectedToolId
+      : undefined;
     const optimisticUser = createOptimisticUserMessage(sessionId, trimmed);
     const tempAssistantId = `local-assistant-${Date.now()}`;
     const optimisticAssistant: ChatMessage = {
@@ -1767,22 +2080,28 @@ export function App() {
 
     setMode('qa');
     setInput('');
+    setSelectedToolId(undefined);
     setLoading(true);
     setError(undefined);
     setMessages((current) => [...current, optimisticUser, optimisticAssistant]);
 
     const streamedContent: string[] = [];
     try {
-      const savedAssistant = await sendMessageStream(sessionId, trimmed, (token) => {
-        streamedContent.push(token);
-        setMessages((current) =>
-          current.map((msg) =>
-            msg.id === tempAssistantId
-              ? { ...msg, content: streamedContent.join('') }
-              : msg
-          )
-        );
-      });
+      const savedAssistant = await sendMessageStream(
+        sessionId,
+        trimmed,
+        (token) => {
+          streamedContent.push(token);
+          setMessages((current) =>
+            current.map((msg) =>
+              msg.id === tempAssistantId
+                ? { ...msg, content: streamedContent.join('') }
+                : msg
+            )
+          );
+        },
+        outgoingToolId ? { toolId: outgoingToolId, scope: 'next_message' } : undefined,
+      );
 
       if (savedAssistant) {
         setMessages((current) =>
@@ -1832,13 +2151,6 @@ export function App() {
   const handleSelectFile = (id: string) => {
     setActiveFileId(id);
     setMode('editor');
-  };
-
-  const handleUseAsContext = (node: FileNode) => {
-    setContextPaths((current) => {
-      if (current.includes(node.path)) return current;
-      return [...current.slice(-2), node.path];
-    });
   };
 
   const handleActivateMessage = (message: ChatMessage) => {
@@ -1985,7 +2297,7 @@ export function App() {
 
   const handleAiComplete = () => {
     requestEditorAi(
-      `请基于当前文件 ${activeFile?.path ?? '未选择文件'} 和上下文 ${contextPaths.join('、')}，补完下面的 Markdown，不要编造未给出的事实：\n\n${editorValue}`,
+      `请基于当前文件 ${activeFile?.path ?? '未选择文件'}，补完下面的 Markdown，不要编造未给出的事实：\n\n${editorValue}`,
       'AI 补完',
     );
   };
@@ -2029,14 +2341,10 @@ export function App() {
       <DataExplorer
         files={files}
         activeFileId={activeFileId}
-        searchQuery={searchQuery}
         expanded={expanded}
-        contextPaths={contextPaths}
         refreshing={refreshing}
-        onSearchChange={setSearchQuery}
         onSelectFile={handleSelectFile}
         onToggleFolder={handleToggleFolder}
-        onUseAsContext={handleUseAsContext}
         onRenameNode={handleRenameNode}
         onCreateFile={handleCreateFile}
         onCreateFolder={handleCreateFolder}
@@ -2074,7 +2382,9 @@ export function App() {
           booting={booting}
           creating={creating}
           deleting={deleting}
-          contextPaths={contextPaths}
+          tools={chatTools}
+          selectedToolId={selectedToolId}
+          toolsLoading={toolsLoading}
           entityOptions={entityOptions}
           activeMessageId={activeMessageId}
           activeCitationIndex={activeCitationIndex}
@@ -2089,6 +2399,8 @@ export function App() {
           onSubmit={() => submitQuestion()}
           onAutoDraft={handleAutoDraft}
           onRefactor={handleRefactor}
+          onSelectTool={setSelectedToolId}
+          onClearTool={() => setSelectedToolId(undefined)}
           onActivateMessage={handleActivateMessage}
           onCitationHover={setActiveCitationIndex}
         />

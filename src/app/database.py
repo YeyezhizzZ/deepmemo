@@ -10,6 +10,12 @@ def get_db_connection():
     return conn
 
 
+def ensure_column(cursor: sqlite3.Cursor, table: str, column: str, definition: str):
+    columns = {row["name"] for row in cursor.execute(f"PRAGMA table_info({table})").fetchall()}
+    if column not in columns:
+        cursor.execute(f"ALTER TABLE {table} ADD COLUMN {definition}")
+
+
 def init_db():
     conn = get_db_connection()
     cursor = conn.cursor()
@@ -23,6 +29,8 @@ def init_db():
             updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
         )
     """)
+    ensure_column(cursor, "session", "session_topic", "session_topic TEXT DEFAULT ''")
+    ensure_column(cursor, "session", "session_summary", "session_summary TEXT DEFAULT ''")
 
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS message (

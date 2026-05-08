@@ -4,11 +4,15 @@ from datetime import datetime
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
+from src.ai.chat_tools import ChatTool, UnknownChatToolError, get_chat_tool, list_chat_tools
 from src.ai.service import knowledge_qa_service
 from src.app.database import get_db_connection
-from src.models.schemas import ChatRequest, MessageResponse
+from src.models.schemas import ChatRequest, ChatToolResponse, MessageResponse
 
 router = APIRouter(prefix="/chat", tags=["chat"])
+MAX_HISTORY_MESSAGES = 20
+MAX_HISTORY_CITATIONS = 4
+MAX_SUMMARY_ITEMS = 12
 
 
 def get_session_row(session_id: str):
@@ -62,22 +66,154 @@ def update_session_message_ids(session_id: str, message_ids: list[str]):
     conn.close()
 
 
-def build_llm_messages(session_id: str) -> list[dict]:
+def build_session_topic(user_message: str, ai_content: str) -> str:
+    seed = " ".join(user_message.split())
+    if not seed:
+        seed = " ".join(strip_generated_references(ai_content).split())
+    if len(seed) > 60:
+        seed = f"{seed[:60]}..."
+    return f"用户询问：{seed}" if seed else ""
+
+
+def update_session_topic_if_empty(session_id: str, user_message: str, ai_content: str):
+    topic = build_session_topic(user_message, ai_content)
+    if not topic:
+        return
+
     conn = get_db_connection()
     cursor = conn.cursor()
-    message_ids = json.loads(cursor.execute("SELECT message_ids FROM session WHERE session_id = ?", (session_id,)).fetchone()["message_ids"])
+    row = cursor.execute("SELECT session_topic FROM session WHERE session_id = ?", (session_id,)).fetchone()
+    if row and not (row["session_topic"] or "").strip():
+        now = datetime.now().isoformat()
+        cursor.execute(
+            "UPDATE session SET session_topic = ?, updated_at = ? WHERE session_id = ?",
+            (topic, now, session_id),
+        )
+        conn.commit()
+    conn.close()
+
+
+def update_session_summary(session_id: str, message_ids: list[str]):
+    if len(message_ids) <= MAX_HISTORY_MESSAGES:
+        return
+
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    older_message_ids = message_ids[:-MAX_HISTORY_MESSAGES][-MAX_SUMMARY_ITEMS:]
+    lines: list[str] = []
+    for message_id in older_message_ids:
+        row = cursor.execute("SELECT role, content FROM message WHERE message_id = ?", (message_id,)).fetchone()
+        if not row:
+            continue
+        role = "用户" if row["role"] == "user" else "助手"
+        content = " ".join(strip_generated_references(row["content"]).split())
+        if len(content) > 140:
+            content = f"{content[:140]}..."
+        if content:
+            lines.append(f"{role}: {content}")
+
+    if lines:
+        now = datetime.now().isoformat()
+        cursor.execute(
+            "UPDATE session SET session_summary = ?, updated_at = ? WHERE session_id = ?",
+            ("\n".join(lines), now, session_id),
+        )
+        conn.commit()
+    conn.close()
+
+
+def strip_generated_references(content: str) -> str:
+    markers = ("\n## 引用", "\n### 引用", "\n## 参考", "\n### 参考")
+    for marker in markers:
+        if content.startswith(marker.lstrip()):
+            return ""
+        index = content.find(marker)
+        if index != -1:
+            return content[:index]
+    return content
+
+
+def build_citation_summary(citations_json: str | None) -> str:
+    try:
+        citations = json.loads(citations_json or "[]")
+    except json.JSONDecodeError:
+        return ""
+
+    paths: list[str] = []
+    seen: set[str] = set()
+    for citation in citations:
+        path = str(citation.get("file_path") or citation.get("evidence_id") or "").strip()
+        if not path or path in seen:
+            continue
+        paths.append(path)
+        seen.add(path)
+        if len(paths) >= MAX_HISTORY_CITATIONS:
+            break
+
+    if not paths:
+        return ""
+    return "引用摘要：" + "；".join(paths)
+
+
+def build_llm_messages(session_id: str, *, max_messages: int = MAX_HISTORY_MESSAGES) -> list[dict]:
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    session_row = cursor.execute(
+        "SELECT message_ids, session_topic, session_summary FROM session WHERE session_id = ?",
+        (session_id,),
+    ).fetchone()
+    message_ids = json.loads(session_row["message_ids"])
     messages = []
-    for mid in message_ids:
+    session_context = []
+    if (session_row["session_topic"] or "").strip():
+        session_context.append(f"会话主题：{session_row['session_topic']}")
+    if (session_row["session_summary"] or "").strip():
+        session_context.append(f"较早对话摘要：\n{session_row['session_summary']}")
+    if session_context:
+        messages.append({"role": "system", "content": "\n".join(session_context)})
+
+    for mid in message_ids[-max_messages:]:
         row = cursor.execute("SELECT * FROM message WHERE message_id = ?", (mid,)).fetchone()
         if row:
             role = "assistant" if row["role"] == "ai" else row["role"]
-            messages.append({"role": role, "content": row["content"]})
+            content = row["content"]
+            if role == "assistant":
+                content = strip_generated_references(content).strip()
+                citation_summary = build_citation_summary(row["citations"])
+                if citation_summary:
+                    content = f"{content}\n\n{citation_summary}".strip()
+            messages.append({"role": role, "content": content})
     conn.close()
     return messages
 
 
+def resolve_chat_tool(request: ChatRequest) -> ChatTool | None:
+    if not request.tool:
+        return None
+    if request.tool.scope != "next_message":
+        raise HTTPException(status_code=400, detail="当前仅支持 next_message 工具作用域")
+    try:
+        return get_chat_tool(request.tool.tool_id)
+    except UnknownChatToolError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.get("/tools", response_model=list[ChatToolResponse])
+def get_tools():
+    return [
+        ChatToolResponse(
+            id=tool.id,
+            name=tool.name,
+            description=tool.description,
+            execution_type=tool.execution_type,
+        )
+        for tool in list_chat_tools()
+    ]
+
+
 @router.post("/", response_model=MessageResponse)
 def chat(request: ChatRequest):
+    selected_tool = resolve_chat_tool(request)
     session = get_session_row(request.session_id)
     message_ids = json.loads(session["message_ids"])
     llm_messages = build_llm_messages(request.session_id)
@@ -86,7 +222,7 @@ def chat(request: ChatRequest):
     save_message(user_msg_id, request.session_id, "user", request.user_message)
     message_ids.append(user_msg_id)
 
-    answer = knowledge_qa_service.answer(request.user_message, history=llm_messages)
+    answer = knowledge_qa_service.answer(request.user_message, history=llm_messages, tool=selected_tool)
     ai_content = answer.content
     citations = build_message_citations(answer)
 
@@ -95,6 +231,8 @@ def chat(request: ChatRequest):
     message_ids.append(ai_msg_id)
 
     update_session_message_ids(request.session_id, message_ids)
+    update_session_topic_if_empty(request.session_id, request.user_message, ai_content)
+    update_session_summary(request.session_id, message_ids)
 
     return MessageResponse(
         message_id=ai_msg_id,
@@ -108,6 +246,7 @@ def chat(request: ChatRequest):
 @router.post("/stream")
 async def chat_stream(request: ChatRequest):
     """SSE 流式聊天端点"""
+    selected_tool = resolve_chat_tool(request)
     session = get_session_row(request.session_id)
     message_ids = json.loads(session["message_ids"])
     llm_messages = build_llm_messages(request.session_id)
@@ -120,7 +259,11 @@ async def chat_stream(request: ChatRequest):
     async def event_generator():
         full_content = ""
         try:
-            answer = knowledge_qa_service.answer_stream(request.user_message, history=llm_messages)
+            answer = knowledge_qa_service.answer_stream(
+                request.user_message,
+                history=llm_messages,
+                tool=selected_tool,
+            )
             for chunk in answer.chunks:
                 full_content += chunk
                 yield format_sse_event({"type": "token", "content": chunk})
@@ -135,6 +278,8 @@ async def chat_stream(request: ChatRequest):
             )
             message_ids.append(ai_msg_id)
             update_session_message_ids(request.session_id, message_ids)
+            update_session_topic_if_empty(request.session_id, request.user_message, full_content)
+            update_session_summary(request.session_id, message_ids)
             yield format_sse_event({"type": "done", "message": saved_message})
         except Exception as exc:
             if full_content:

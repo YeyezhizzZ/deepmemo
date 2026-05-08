@@ -2,6 +2,8 @@ export type Session = {
   sessionId: string;
   sessionName: string;
   messageIds: string[];
+  sessionTopic?: string;
+  sessionSummary?: string;
   createdAt: string;
   updatedAt: string;
 };
@@ -23,12 +25,27 @@ export type Citation = {
 
 export type SyncStatus = 'synced' | 'dirty' | 'draft' | 'processing' | 'error';
 
+export type ChatToolExecutionType = 'inline' | 'job';
+
+export type ChatTool = {
+  id: string;
+  name: string;
+  description: string;
+  executionType: ChatToolExecutionType;
+};
+
+export type ChatToolSelection = {
+  toolId: string;
+  scope?: 'next_message' | 'session';
+};
+
 export type FsNode = {
   id: string;
   name: string;
   path: string;
   type: 'file' | 'directory';
   syncStatus: SyncStatus;
+  modifiedAt?: string;
   children?: FsNode[];
 };
 
@@ -36,6 +53,8 @@ export type ApiSessionResponse = {
   session_id: string;
   session_name: string;
   message_ids: string[];
+  session_topic?: string;
+  session_summary?: string;
   created_at: string;
   updated_at: string;
 };
@@ -62,11 +81,19 @@ export type ApiCitationsResponse = {
 
 export type ApiSyncStatus = SyncStatus;
 
+export type ApiChatToolResponse = {
+  id: string;
+  name: string;
+  description: string;
+  execution_type: ChatToolExecutionType;
+};
+
 export type ApiFsNode = {
   name: string;
   path: string;
   type: 'file' | 'directory';
   sync_status: ApiSyncStatus;
+  modified?: string;
   children?: ApiFsNode[];
 };
 

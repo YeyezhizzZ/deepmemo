@@ -22,6 +22,27 @@ def natural_name_key(path: Path):
     natural_parts = tuple((0, int(part)) if part.isdigit() else (1, part) for part in parts)
     return (1, 0, natural_parts)
 
+
+def modified_time(path: Path) -> float:
+    try:
+        return path.stat().st_mtime
+    except OSError:
+        return 0
+
+
+def modified_iso(path: Path) -> str:
+    return datetime.fromtimestamp(modified_time(path)).isoformat()
+
+
+def sort_key_for_directory(path: Path, base_path: str):
+    """Sort diary entries like chat sessions: most recently edited first."""
+    base_parts = Path(base_path).parts if base_path else ()
+    if base_parts and base_parts[0] == "diary":
+        hidden_rank = 1 if path.name.startswith(".") else 0
+        return (hidden_rank, -modified_time(path), natural_name_key(path))
+    return natural_name_key(path)
+
+
 def get_db_connection():
     conn = sqlite3.connect(DATABASE_PATH)
     conn.row_factory = sqlite3.Row
@@ -145,16 +166,18 @@ def scan_directory_tree(base_path: str = "") -> list:
     result = []
     if not scan_path.exists():
         return result
-    for item in sorted(scan_path.iterdir(), key=natural_name_key):
+    for item in sorted(scan_path.iterdir(), key=lambda path: sort_key_for_directory(path, base_path)):
         rel_path = str(item.relative_to(DATA_DIR))
         meta = get_file_meta(rel_path)
         sync_status = meta["sync_status"] if meta else "synced"
+        modified = modified_iso(item)
         if item.is_dir():
             result.append({
                 "name": item.name,
                 "path": rel_path,
                 "type": "directory",
                 "sync_status": sync_status,
+                "modified": modified,
                 "children": scan_directory_tree(rel_path)
             })
         else:
@@ -162,6 +185,7 @@ def scan_directory_tree(base_path: str = "") -> list:
                 "name": item.name,
                 "path": rel_path,
                 "type": "file",
-                "sync_status": sync_status
+                "sync_status": sync_status,
+                "modified": modified
             })
     return result

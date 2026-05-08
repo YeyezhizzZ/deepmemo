@@ -89,6 +89,7 @@ class KnowledgeBaseTools:
         target = self._resolve_path(path, allow_dir=True) if path else self.root_path
         if target.is_file() and not self._is_allowed_markdown(target):
             raise KnowledgeBaseAccessError("只能搜索 Markdown 文件。")
+        search_files = self._search_files(target) if target.is_dir() else [target]
 
         base_cmd = [
             self.rg_command,
@@ -101,26 +102,12 @@ class KnowledgeBaseTools:
         ]
 
         if mode == "files_with_matches":
-            result = self._run_rg([*base_cmd, "--files-with-matches", "--", query, str(target)])
-            return self._parse_files_result(query, mode, result.stdout, result.returncode)
+            return self._grep_files_with_matches(query, mode, base_cmd, search_files)
 
         if mode == "count":
-            result = self._run_rg([*base_cmd, "--count-matches", "--with-filename", "--", query, str(target)])
-            return self._parse_count_result(query, mode, result.stdout, result.returncode)
+            return self._grep_count(query, mode, base_cmd, search_files)
 
-        result = self._run_rg(
-            [
-                *base_cmd,
-                "--json",
-                "--line-number",
-                "--context",
-                str(context),
-                "--",
-                query,
-                str(target),
-            ]
-        )
-        return self._parse_content_result(query, mode, result.stdout, result.returncode, context)
+        return self._grep_content(query, mode, base_cmd, search_files, context)
 
     def count_matches(self, query: str, path: str | None = None) -> GrepContentResult:
         return self.grep_content(query, path=path, mode="count")
@@ -150,6 +137,100 @@ class KnowledgeBaseTools:
         if truncated:
             message = f"单次 read_lines 限制为 {self.max_read_lines} 行，已截断。"
         return ReadLinesResult(path=self._relative_path(target), start=start, end=end, lines=lines, truncated=truncated, message=message)
+
+    def _grep_files_with_matches(
+        self,
+        query: str,
+        mode: GrepMode,
+        base_cmd: list[str],
+        search_files: list[Path],
+    ) -> GrepContentResult:
+        files: list[str] = []
+        truncated = False
+        for file_path in search_files:
+            if len(files) >= self.max_results:
+                truncated = True
+                break
+            result = self._run_rg([*base_cmd, "--files-with-matches", "--", query, str(file_path)])
+            if result.returncode == 0:
+                files.append(self._relative_path(file_path))
+
+        return GrepContentResult(
+            query=query,
+            mode=mode,
+            files=files,
+            truncated=truncated,
+            message=self._limit_message(truncated),
+        )
+
+    def _grep_count(
+        self,
+        query: str,
+        mode: GrepMode,
+        base_cmd: list[str],
+        search_files: list[Path],
+    ) -> GrepContentResult:
+        counts: list[CountMatch] = []
+        truncated = False
+        for file_path in search_files:
+            if len(counts) >= self.max_results:
+                truncated = True
+                break
+            result = self._run_rg([*base_cmd, "--count-matches", "--with-filename", "--", query, str(file_path)])
+            parsed = self._parse_count_result(query, mode, result.stdout, result.returncode)
+            if parsed.counts:
+                counts.extend(parsed.counts)
+
+        counts.sort(key=lambda item: item.count, reverse=True)
+        return GrepContentResult(
+            query=query,
+            mode=mode,
+            counts=counts,
+            truncated=truncated,
+            message=self._limit_message(truncated),
+        )
+
+    def _grep_content(
+        self,
+        query: str,
+        mode: GrepMode,
+        base_cmd: list[str],
+        search_files: list[Path],
+        context: int,
+    ) -> GrepContentResult:
+        hits: list[GrepHit] = []
+        truncated = False
+        for file_path in search_files:
+            if len(hits) >= self.max_results:
+                truncated = True
+                break
+            result = self._run_rg(
+                [
+                    *base_cmd,
+                    "--json",
+                    "--line-number",
+                    "--context",
+                    str(context),
+                    "--",
+                    query,
+                    str(file_path),
+                ]
+            )
+            parsed = self._parse_content_result(query, mode, result.stdout, result.returncode, context)
+            truncated = truncated or parsed.truncated
+            for hit in parsed.hits:
+                if len(hits) >= self.max_results:
+                    truncated = True
+                    break
+                hits.append(hit)
+
+        return GrepContentResult(
+            query=query,
+            mode=mode,
+            hits=hits,
+            truncated=truncated,
+            message=self._limit_message(truncated),
+        )
 
     def _parse_files_result(
         self,
@@ -305,6 +386,45 @@ class KnowledgeBaseTools:
         if result.returncode not in (0, 1):
             raise RuntimeError(result.stderr.strip() or "ripgrep 搜索失败。")
         return result
+
+    def _search_files(self, target: Path) -> list[Path]:
+        candidates = target.rglob("*.md")
+        files = [
+            candidate
+            for candidate in candidates
+            if candidate.is_file() and self._is_allowed_markdown(candidate)
+        ]
+        return sorted(files, key=self._search_sort_key)
+
+    def _search_sort_key(self, path: Path) -> tuple[int, int, int, str]:
+        diary_date = self._diary_filename_date(path)
+        rel_path = self._relative_path(path)
+        if diary_date:
+            month, day = diary_date
+            return (0, -month, -day, rel_path)
+        return (1, 0, 0, rel_path)
+
+    def _diary_filename_date(self, path: Path) -> tuple[int, int] | None:
+        rel_parts = path.resolve().relative_to(self.root_path).parts
+        if not rel_parts or rel_parts[0] != "diary":
+            return None
+
+        stem = path.stem
+        if not stem.isdigit() or len(stem) < 2:
+            return None
+        if len(stem) == 2:
+            month = int(stem[0])
+            day = int(stem[1])
+        elif len(stem) == 3:
+            month = int(stem[0])
+            day = int(stem[1:])
+        else:
+            month = int(stem[:-2])
+            day = int(stem[-2:])
+
+        if 1 <= month <= 12 and 1 <= day <= 31:
+            return month, day
+        return None
 
     def _looks_like_path(self, pattern: str) -> bool:
         return not any(token in pattern for token in ("*", "?", "[", "]"))

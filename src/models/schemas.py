@@ -24,10 +24,25 @@ class SessionResponse(BaseModel):
     session_id: str
     session_name: str
     message_ids: list[str]
+    session_topic: str = ""
+    session_summary: str = ""
     created_at: datetime
     updated_at: datetime
+
+
+class ChatToolSelection(BaseModel):
+    tool_id: str
+    scope: str = "next_message"
+
+
+class ChatToolResponse(BaseModel):
+    id: str
+    name: str
+    description: str
+    execution_type: str
 
 
 class ChatRequest(BaseModel):
     session_id: str
     user_message: str
+    tool: Optional[ChatToolSelection] = None

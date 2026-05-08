@@ -106,10 +106,47 @@ class WebSearchResult:
 
 
 @dataclass
+class WebExtractResult:
+    enabled: bool
+    used: bool = False
+    results: list[dict] = field(default_factory=list)  # [{"url": ..., "raw_content": ...}]
+    failed_results: list[dict] = field(default_factory=list)
+    message: str | None = None
+
+
+@dataclass
+class WebCrawlResult:
+    enabled: bool
+    used: bool = False
+    base_url: str = ""
+    results: list[dict] = field(default_factory=list)  # [{"url": ..., "raw_content": ...}]
+    message: str | None = None
+
+
+@dataclass
+class WebMapResult:
+    enabled: bool
+    used: bool = False
+    base_url: str = ""
+    results: list[str] = field(default_factory=list)  # URL list
+    message: str | None = None
+
+
+@dataclass
+class QueryRewriteResult:
+    original_question: str
+    rewritten_query: str
+    changed: bool = False
+    reason: str | None = None
+
+
+@dataclass
 class KnowledgeAnswer:
     content: str
     route: RouteDecision
     local_result: LocalSearchResult
+    retrieval_query: str | None = None
+    rewrite_changed: bool = False
     web_result: WebSearchResult | None = None
 
 
@@ -118,4 +155,6 @@ class KnowledgeAnswerStream:
     chunks: Iterator[str]
     route: RouteDecision
     local_result: LocalSearchResult
+    retrieval_query: str | None = None
+    rewrite_changed: bool = False
     web_result: WebSearchResult | None = None
