@@ -10,7 +10,6 @@ import {
   Code2,
   Command,
   Database,
-  FileDown,
   FilePlus2,
   FileText,
   Folder,
@@ -742,7 +741,6 @@ function WorkspaceHeader({
   onAiComplete,
   onSave,
   onFormat,
-  onExport,
 }: {
   activeFile?: FileNode;
   mode: WorkspaceMode;
@@ -751,7 +749,6 @@ function WorkspaceHeader({
   onAiComplete: () => void;
   onSave: () => void;
   onFormat: () => void;
-  onExport: () => void;
 }) {
   return (
     <header className="workspace-header">
@@ -791,10 +788,6 @@ function WorkspaceHeader({
         <button type="button" onClick={onFormat}>
           <Command size={15} />
           格式化
-        </button>
-        <button type="button" onClick={onExport}>
-          <FileDown size={15} />
-          导出
         </button>
       </div>
     </header>
@@ -2306,10 +2299,6 @@ export function App() {
     setActiveEditorValue(formatEditorMarkdown(editorValue));
   };
 
-  const handleExport = () => {
-    submitQuestion(`请将 ${activeFile?.path ?? '当前文档'} 导出为 Wiki/PDF 结构，并保留引用证据。`);
-  };
-
   const handleRefactor = () => {
     requestEditorAi(
       `请润色并重构当前 Markdown，保留事实和引用，按“结论 -> 证据 -> 下一步”的结构输出：\n\n${editorValue}`,
@@ -2360,7 +2349,6 @@ export function App() {
           onAiComplete={handleAiComplete}
           onSave={handleSave}
           onFormat={handleFormat}
-          onExport={handleExport}
         />
         {error && (
           <div className="error-banner">

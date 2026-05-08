@@ -50,6 +50,7 @@
 | user-memory | 管理USER.md |
 | diary-extract | 日记提取周报月报 |
 | diary-review | 日记格式审核 |
+| git-code-standards | Git代码规范（分支、提交、环境） |
 
 ---
 
