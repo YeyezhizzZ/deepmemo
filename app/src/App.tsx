@@ -802,6 +802,7 @@ function EditorContent({
   onChange,
   onInsertEntity,
   onSlashCommand,
+  onSave,
 }: {
   activeFile?: FileNode;
   value: string;
@@ -810,6 +811,7 @@ function EditorContent({
   onChange: (value: string) => void;
   onInsertEntity: (entity: string) => void;
   onSlashCommand: (command: 'daily' | 'extract' | 'polish') => void;
+  onSave: () => void;
 }) {
   const atQuery = useMemo(() => {
     const match = /@([\w-]*)$/i.exec(value);
@@ -845,6 +847,12 @@ function EditorContent({
           <textarea
             value={value}
             onChange={(event) => onChange(event.target.value)}
+            onKeyDown={(event) => {
+              if ((event.ctrlKey || event.metaKey) && event.key === 's') {
+                event.preventDefault();
+                onSave();
+              }
+            }}
             spellCheck={false}
             aria-label="Markdown 编辑器"
           />
@@ -1264,6 +1272,7 @@ function HybridWorkspace({
   onEditorChange,
   onInsertEntity,
   onSlashCommand,
+  onSave,
   onAskExample,
   onSelectSession,
   onCreateSession,
@@ -1299,6 +1308,7 @@ function HybridWorkspace({
   onEditorChange: (value: string) => void;
   onInsertEntity: (entity: string) => void;
   onSlashCommand: (command: 'daily' | 'extract' | 'polish') => void;
+  onSave: () => void;
   onAskExample: (question: string) => void;
   onSelectSession: (id: string) => void;
   onCreateSession: () => void;
@@ -1324,6 +1334,7 @@ function HybridWorkspace({
             onChange={onEditorChange}
             onInsertEntity={onInsertEntity}
             onSlashCommand={onSlashCommand}
+            onSave={onSave}
           />
         ) : (
           <div className="qa-panel">
@@ -2379,6 +2390,7 @@ export function App() {
           onEditorChange={setActiveEditorValue}
           onInsertEntity={handleInsertEntity}
           onSlashCommand={handleSlashCommand}
+          onSave={handleSave}
           onAskExample={submitQuestion}
           onSelectSession={handleSelectSession}
           onCreateSession={handleCreateSession}
