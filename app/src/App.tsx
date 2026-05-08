@@ -2209,10 +2209,6 @@ export function App() {
     try {
       const response = await writeFile(activeFile.path, editorValue);
       setFiles((current) => updateNodeStatus(current, response.file_path, response.sync_status));
-      const refreshedFile = await refreshFileTree(activeFile.id);
-      if (refreshedFile) {
-        await loadFileContent(refreshedFile);
-      }
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : '文件保存失败');
       setFiles((current) => updateNodeStatus(current, activeFile.path, 'error'));
