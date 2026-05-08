@@ -40,11 +40,16 @@ Thumbs.db
 *.temp
 *.bak
 
-# data files - only ignore if data is large or private
-data/
+# data files - keep private knowledge base out of git, but publish mock demo data
+data/*
+!data/mock/
+!data/mock/**
 *.db
 
 config/llm_api.yaml
 .claude/
 agents.md
 claude.md
+
+reference/*
+docx/*

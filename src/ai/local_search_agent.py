@@ -24,7 +24,7 @@ class LocalSearchAgent:
     def search(self, question: str, route: RouteDecision | None = None) -> LocalSearchResult:
         route = route or self.router.route(question)
         queries = self._build_queries(question, route)
-        paths = route.path_hints or [None]
+        paths = self._resolve_search_paths(route.path_hints)
         searched_paths = [path for path in paths if path]
 
         evidence: list[Evidence] = []
@@ -48,8 +48,8 @@ class LocalSearchAgent:
                     evidence.append(item)
                     seen_sources.add(item.source_id)
 
-        if not evidence and route.path_hints:
-            evidence.extend(self._fallback_read_scoped_files(route.path_hints))
+        if not evidence and searched_paths:
+            evidence.extend(self._fallback_read_scoped_files(searched_paths))
 
         evidence.sort(key=lambda item: item.score, reverse=True)
         evidence = evidence[: self.max_evidence]
@@ -67,6 +67,20 @@ class LocalSearchAgent:
             truncated=truncated,
             message=message,
         )
+
+    def _resolve_search_paths(self, path_hints: list[str]) -> list[str | None]:
+        if not path_hints:
+            return [None]
+
+        existing_paths: list[str | None] = []
+        for path in path_hints:
+            try:
+                if self.tools.glob_files(path).files:
+                    existing_paths.append(path)
+            except FileNotFoundError:
+                continue
+
+        return existing_paths or [None]
 
     def _build_queries(self, question: str, route: RouteDecision) -> list[str]:
         candidates = [*route.query_hints]

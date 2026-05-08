@@ -40,6 +40,7 @@ class QueryRouter:
         "五月",
     )
     memory_terms: tuple[str, ...] = ("记忆", "memory", "偏好", "个人信息")
+    mock_terms: tuple[str, ...] = ("deepmemo", "mock", "demo", "示例", "演示", "截图", "知识库问答")
 
     def route(self, question: str) -> RouteDecision:
         normalized = question.strip()
@@ -47,6 +48,11 @@ class QueryRouter:
         path_hints: list[str] = ["diary"]
         reasons: list[str] = ["默认把 data/diary 作为第一检索范围，因为日常记录是最高优先级本地证据。"]
         matched_scoped_directory = False
+
+        if self._contains_any(lower, self.mock_terms):
+            path_hints.insert(0, "mock")
+            matched_scoped_directory = True
+            reasons.append("命中演示或知识库问答相关问题，优先搜索 data/mock。")
 
         if self._contains_any(lower, self.idea_terms):
             path_hints.append("ideas")
