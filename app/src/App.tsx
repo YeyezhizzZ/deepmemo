@@ -1,4 +1,6 @@
-import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import Vditor from 'vditor';
+import 'vditor/dist/index.css';
 import {
   AlertCircle,
   AtSign,
@@ -80,15 +82,6 @@ type ParsedMarkdown = {
   bodyLines: string[];
   sources: SourceChunk[];
 };
-
-type MarkdownPreviewBlock =
-  | { type: 'blockquote'; lines: string[] }
-  | { type: 'code'; language?: string; code: string }
-  | { type: 'heading'; level: 1 | 2 | 3 | 4 | 5 | 6; text: string }
-  | { type: 'hr' }
-  | { type: 'list'; ordered: boolean; items: string[] }
-  | { type: 'paragraph'; text: string }
-  | { type: 'table'; headers: string[]; rows: string[][] };
 
 function trimTrailingBlankLines(lines: string[]): string[] {
   const next = [...lines];
@@ -264,275 +257,80 @@ function formatEditorMarkdown(value: string): string {
     .trimStart();
 }
 
-function isTableSeparator(line: string): boolean {
-  const cells = splitTableRow(line);
-  return cells.length > 1 && cells.every((cell) => /^:?-{3,}:?$/.test(cell.trim()));
-}
+function VditorMarkdownEditor({
+  value,
+  onChange,
+  onSave,
+}: {
+  value: string;
+  onChange: (value: string) => void;
+  onSave: () => void;
+}) {
+  const mountRef = useRef<HTMLDivElement>(null);
+  const editorRef = useRef<Vditor>();
+  const latestValueRef = useRef(value);
+  const onChangeRef = useRef(onChange);
+  const onSaveRef = useRef(onSave);
 
-function splitTableRow(line: string): string[] {
-  return line
-    .trim()
-    .replace(/^\|/, '')
-    .replace(/\|$/, '')
-    .split('|')
-    .map((cell) => cell.trim());
-}
+  useEffect(() => {
+    onChangeRef.current = onChange;
+  }, [onChange]);
 
-function isBlockStart(line: string, nextLine?: string): boolean {
-  const trimmed = line.trim();
-  return (
-    /^#{1,6}\s+/.test(trimmed)
-    || /^```/.test(trimmed)
-    || /^>\s?/.test(trimmed)
-    || /^[-*+]\s+/.test(trimmed)
-    || /^\d+\.\s+/.test(trimmed)
-    || /^(-{3,}|\*{3,}|_{3,})$/.test(trimmed)
-    || (line.includes('|') && nextLine !== undefined && isTableSeparator(nextLine))
-  );
-}
+  useEffect(() => {
+    onSaveRef.current = onSave;
+  }, [onSave]);
 
-function parseMarkdownPreview(content: string): MarkdownPreviewBlock[] {
-  const lines = content.replace(/\r\n/g, '\n').split('\n');
-  const blocks: MarkdownPreviewBlock[] = [];
-  let index = 0;
+  useEffect(() => {
+    if (!mountRef.current) return undefined;
 
-  while (index < lines.length) {
-    const line = lines[index];
-    const trimmed = line.trim();
-    const nextLine = lines[index + 1];
-
-    if (!trimmed) {
-      index += 1;
-      continue;
-    }
-
-    if (/^```/.test(trimmed)) {
-      const language = trimmed.replace(/^```/, '').trim() || undefined;
-      const codeLines: string[] = [];
-      index += 1;
-      while (index < lines.length && !lines[index].trim().startsWith('```')) {
-        codeLines.push(lines[index]);
-        index += 1;
-      }
-      if (index < lines.length) {
-        index += 1;
-      }
-      blocks.push({ type: 'code', language, code: codeLines.join('\n') });
-      continue;
-    }
-
-    if (line.includes('|') && nextLine !== undefined && isTableSeparator(nextLine)) {
-      const headers = splitTableRow(line);
-      const rows: string[][] = [];
-      index += 2;
-      while (index < lines.length && lines[index].includes('|') && lines[index].trim()) {
-        rows.push(splitTableRow(lines[index]));
-        index += 1;
-      }
-      blocks.push({ type: 'table', headers, rows });
-      continue;
-    }
-
-    const headingMatch = /^(#{1,6})\s+(.+)$/.exec(trimmed);
-    if (headingMatch) {
-      blocks.push({
-        type: 'heading',
-        level: headingMatch[1].length as 1 | 2 | 3 | 4 | 5 | 6,
-        text: headingMatch[2],
-      });
-      index += 1;
-      continue;
-    }
-
-    if (/^(-{3,}|\*{3,}|_{3,})$/.test(trimmed)) {
-      blocks.push({ type: 'hr' });
-      index += 1;
-      continue;
-    }
-
-    if (/^>\s?/.test(trimmed)) {
-      const quoteLines: string[] = [];
-      while (index < lines.length && /^>\s?/.test(lines[index].trim())) {
-        quoteLines.push(lines[index].trim().replace(/^>\s?/, ''));
-        index += 1;
-      }
-      blocks.push({ type: 'blockquote', lines: quoteLines });
-      continue;
-    }
-
-    if (/^[-*+]\s+/.test(trimmed)) {
-      const items: string[] = [];
-      while (index < lines.length && /^[-*+]\s+/.test(lines[index].trim())) {
-        items.push(lines[index].trim().replace(/^[-*+]\s+/, ''));
-        index += 1;
-      }
-      blocks.push({ type: 'list', ordered: false, items });
-      continue;
-    }
-
-    if (/^\d+\.\s+/.test(trimmed)) {
-      const items: string[] = [];
-      while (index < lines.length && /^\d+\.\s+/.test(lines[index].trim())) {
-        items.push(lines[index].trim().replace(/^\d+\.\s+/, ''));
-        index += 1;
-      }
-      blocks.push({ type: 'list', ordered: true, items });
-      continue;
-    }
-
-    const paragraphLines: string[] = [];
-    while (
-      index < lines.length
-      && lines[index].trim()
-      && !isBlockStart(lines[index], lines[index + 1])
-    ) {
-      paragraphLines.push(lines[index].trim());
-      index += 1;
-    }
-    blocks.push({ type: 'paragraph', text: paragraphLines.join(' ') });
-  }
-
-  return blocks;
-}
-
-function renderInlineMarkdown(text: string, keyPrefix: string): ReactNode[] {
-  const pattern = /(\[[^\]]+\]\([^)]+\)|`[^`]+`|\*\*[^*]+\*\*|__[^_]+__|\*[^*\s][^*]*\*|_[^_\s][^_]*_)/g;
-  const nodes: ReactNode[] = [];
-  let lastIndex = 0;
-  let partIndex = 0;
-
-  for (const match of text.matchAll(pattern)) {
-    if (match.index === undefined) continue;
-    if (match.index > lastIndex) {
-      nodes.push(text.slice(lastIndex, match.index));
-    }
-
-    const token = match[0];
-    const key = `${keyPrefix}-${partIndex}`;
-    const linkMatch = /^\[([^\]]+)\]\(([^)]+)\)$/.exec(token);
-    if (linkMatch) {
-      const href = normalizePreviewHref(linkMatch[2]);
-      nodes.push(
-        <a href={href} target="_blank" rel="noreferrer" key={key}>
-          {linkMatch[1]}
-        </a>,
-      );
-    } else if (token.startsWith('`')) {
-      nodes.push(<code key={key}>{token.slice(1, -1)}</code>);
-    } else if (token.startsWith('**') || token.startsWith('__')) {
-      nodes.push(<strong key={key}>{token.slice(2, -2)}</strong>);
-    } else {
-      nodes.push(<em key={key}>{token.slice(1, -1)}</em>);
-    }
-
-    lastIndex = match.index + token.length;
-    partIndex += 1;
-  }
-
-  if (lastIndex < text.length) {
-    nodes.push(text.slice(lastIndex));
-  }
-
-  return nodes;
-}
-
-function normalizePreviewHref(value: string): string {
-  const href = value.trim();
-  if (/^(https?:|mailto:|#|\/)/i.test(href)) {
-    return href;
-  }
-  return '#';
-}
-
-function MarkdownPreview({ content }: { content: string }) {
-  const blocks = useMemo(() => parseMarkdownPreview(content), [content]);
-
-  if (blocks.length === 0) {
-    return (
-      <div className="markdown-preview markdown-preview--empty">
-        <span>Preview</span>
-      </div>
-    );
-  }
-
-  return (
-    <div className="markdown-preview">
-      {blocks.map((block, index) => {
-        if (block.type === 'heading') {
-          const children = renderInlineMarkdown(block.text, `heading-${index}`);
-          if (block.level === 1) return <h1 key={index}>{children}</h1>;
-          if (block.level === 2) return <h2 key={index}>{children}</h2>;
-          if (block.level === 3) return <h3 key={index}>{children}</h3>;
-          if (block.level === 4) return <h4 key={index}>{children}</h4>;
-          if (block.level === 5) return <h5 key={index}>{children}</h5>;
-          return <h6 key={index}>{children}</h6>;
+    const editor = new Vditor(mountRef.current, {
+      value,
+      mode: 'wysiwyg',
+      cdn: '/vditor',          // 从本地 public/vditor 加载资源，避免依赖 unpkg CDN
+      height: '100%',
+      minHeight: 0,
+      placeholder: 'Markdown',
+      cache: { enable: false },
+      toolbar: [],
+      counter: { enable: false },
+      preview: {
+        markdown: {
+          autoSpace: true,
+        },
+      },
+      input: (nextValue) => {
+        latestValueRef.current = nextValue;
+        onChangeRef.current(nextValue);
+      },
+      keydown: (event) => {
+        if ((event.ctrlKey || event.metaKey) && event.key === 's') {
+          event.preventDefault();
+          onSaveRef.current();
         }
+      },
+      after: () => {
+        editorRef.current = editor;
+      },
+    });
 
-        if (block.type === 'paragraph') {
-          return <p key={index}>{renderInlineMarkdown(block.text, `paragraph-${index}`)}</p>;
-        }
+    editorRef.current = editor;
 
-        if (block.type === 'list') {
-          const ListTag = block.ordered ? 'ol' : 'ul';
-          return (
-            <ListTag key={index}>
-              {block.items.map((item, itemIndex) => (
-                <li key={itemIndex}>{renderInlineMarkdown(item, `list-${index}-${itemIndex}`)}</li>
-              ))}
-            </ListTag>
-          );
-        }
+    return () => {
+      editor.destroy();
+      if (editorRef.current === editor) {
+        editorRef.current = undefined;
+      }
+    };
+  }, []);
 
-        if (block.type === 'blockquote') {
-          return (
-            <blockquote key={index}>
-              {block.lines.map((quoteLine, quoteIndex) => (
-                <p key={quoteIndex}>{renderInlineMarkdown(quoteLine, `quote-${index}-${quoteIndex}`)}</p>
-              ))}
-            </blockquote>
-          );
-        }
+  useEffect(() => {
+    const editor = editorRef.current;
+    if (!editor || latestValueRef.current === value) return;
+    latestValueRef.current = value;
+    editor.setValue(value, true);
+  }, [value]);
 
-        if (block.type === 'code') {
-          return (
-            <pre key={index}>
-              {block.language && <span className="markdown-preview__language">{block.language}</span>}
-              <code>{block.code}</code>
-            </pre>
-          );
-        }
-
-        if (block.type === 'table') {
-          return (
-            <div className="markdown-preview__table-wrap" key={index}>
-              <table>
-                <thead>
-                  <tr>
-                    {block.headers.map((header, headerIndex) => (
-                      <th key={headerIndex}>{renderInlineMarkdown(header, `table-head-${index}-${headerIndex}`)}</th>
-                    ))}
-                  </tr>
-                </thead>
-                <tbody>
-                  {block.rows.map((row, rowIndex) => (
-                    <tr key={rowIndex}>
-                      {block.headers.map((_, cellIndex) => (
-                        <td key={cellIndex}>
-                          {renderInlineMarkdown(row[cellIndex] ?? '', `table-cell-${index}-${rowIndex}-${cellIndex}`)}
-                        </td>
-                      ))}
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          );
-        }
-
-        return <hr key={index} />;
-      })}
-    </div>
-  );
+  return <div className="vditor-editor-host" ref={mountRef} />;
 }
 
 function getMessageSources(message?: ChatMessage): SourceChunk[] {
@@ -841,25 +639,14 @@ function EditorContent({
         </div>
       </div>
 
-      <div className="editor-surface editor-surface--split">
-        <div className="editor-pane editor-pane--input">
+      <div className="editor-surface editor-surface--live">
+        <div className="editor-pane editor-pane--live">
           <div className="editor-pane__label">Markdown</div>
-          <textarea
+          <VditorMarkdownEditor
             value={value}
-            onChange={(event) => onChange(event.target.value)}
-            onKeyDown={(event) => {
-              if ((event.ctrlKey || event.metaKey) && event.key === 's') {
-                event.preventDefault();
-                onSave();
-              }
-            }}
-            spellCheck={false}
-            aria-label="Markdown 编辑器"
+            onChange={onChange}
+            onSave={onSave}
           />
-        </div>
-        <div className="editor-pane editor-pane--preview">
-          <div className="editor-pane__label">Preview</div>
-          <MarkdownPreview content={value} />
         </div>
         {entityMatches.length > 0 && (
           <div className="floating-menu entity-menu">

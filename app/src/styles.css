@@ -502,7 +502,7 @@ button:disabled {
 .editor-surface {
   position: relative;
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  grid-template-columns: minmax(0, 1fr);
   min-height: 0;
   overflow: hidden;
   background: #fff;
@@ -519,6 +519,48 @@ button:disabled {
 .editor-pane--preview {
   border-left: 1px solid var(--border);
   background: #fbfdff;
+}
+
+.editor-pane--live {
+  min-height: 0;
+}
+
+.vditor-editor-host,
+.editor-pane--live > .vditor-editor-host,
+.vditor-editor-host .vditor {
+  height: 100%;
+  min-height: 0;
+}
+
+.vditor-editor-host .vditor {
+  display: flex;
+  flex-direction: column;
+  border: 0;
+  border-radius: 0;
+  --border-color: var(--border);
+}
+
+.vditor-editor-host .vditor-content {
+  flex: 1;
+  min-height: 0;
+}
+
+.vditor-editor-host .vditor-wysiwyg {
+  height: 100% !important;
+  min-height: 0 !important;
+  background: #fff;
+  color: var(--text);
+  font-size: 15px;
+  line-height: 1.75;
+  padding: 24px 28px 56px;
+}
+
+.vditor-editor-host .vditor-toolbar {
+  display: none;
+}
+
+.vditor-editor-host .vditor-reset {
+  color: var(--text);
 }
 
 .editor-pane__label {
@@ -1508,7 +1550,7 @@ button:disabled {
 
   .editor-surface {
     grid-template-columns: 1fr;
-    grid-template-rows: minmax(0, 1fr) minmax(0, 1fr);
+    grid-template-rows: minmax(0, 1fr);
   }
 
   .editor-pane--preview {
