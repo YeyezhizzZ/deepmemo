@@ -48,6 +48,7 @@ data/*
 
 config/llm_api.yaml
 .claude/
+.agents/
 agents.md
 claude.md
 

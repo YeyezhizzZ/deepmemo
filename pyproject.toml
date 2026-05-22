@@ -11,6 +11,11 @@ dependencies = [
     "watchdog>=3.0",
     "tavily-python>=0.7.0",
     "mcp>=1.27.0",
+    "pillow>=12.2.0",
+    "six>=1.17.0",
+    "werkzeug>=3.1.8",
+    "beautifulsoup4>=4.14.3",
+    "lxml>=6.1.1",
 ]
 
 [dependency-groups]

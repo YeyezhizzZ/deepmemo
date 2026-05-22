@@ -158,88 +158,188 @@ MVP 阶段前端保持现有对话 UI，只需要确保每轮请求都带上稳�
 **状态**: MVP 已完成（2026-05-08），剩余增强待实现
 
 
+## 4. 公众号搜索拿不到 profile_url
+
+**类型**: Bug
+**状态**: 已完成（Tavily-only URL 发现，2026-05-19）
+
+**问题描述**: blog-diary-fetch 在抓微信公众号时，第一步通过搜狗微信搜索获取公众号主页 `profile_url` 经常失败，导致后续历史页解析与正文抽取都无法继续。
+
+**目标**: 稳定拿到公众号当天文章 `article_url`，不再依赖搜狗 `profile_url`；如果 Tavily 没有返回可用文章 URL，要返回细分 warning，而不是只输出泛化失败。
+
+**涉及位置**:
+- `.agents/skills/blog-diary-fetch/src/app/core/blog_fetcher.py` - `TavilySearchClient.discover_wechat_articles()` / `BlogDiaryService.collect_wechat_entries()`
+- `.agents/skills/blog-diary-fetch/tests/test_wechat_web_search.py` - Tavily URL 发现、空结果 warning、正文降级回归测试
+- `.agents/skills/blog-diary-fetch/config/web_search.yaml` - Tavily API key 与启用配置
+- `.agents/skills/blog-diary-fetch/SKILL.md` - 公众号抓取流程说明
+
+**备注**: 已移除搜狗 `profile_url` / 历史页 fallback，当前实现只保留 Tavily 文章 URL 发现 + 微信文章页抓正文的链路，适合通过定时任务自动生成日记草稿。
+
+**决策人**: gzy
+
 ## 3. 工程博客更新自动生成日记
 
 **类型**: 功能
-**问题描述**: 目前工程博客链接需要手动查看、摘录和写入日记。希望维护一组工程博客/RSS/网页链接，每天晚上自动判断是否有新内容；如果有更新，就抓取正文、生成摘要，并合并生成当天日记草稿。
+**问题描述**: 目前工程博客链接需要手动查看、摘录和写入日记。希望维护一组工程博客/RSS/网页链接和微信公众号列表，每天自动判断是否有昨天的新内容；如果有更新，就抓取正文、生成摘要，并合并生成当天日记草稿。
 
-**实现思路**:
+**当前状态**:
 
-### 1. 订阅源配置
+### 可行性确认
 
-新增配置文件保存工程博客来源，例如 `config/blog_sources.yaml`。
+| 来源 | 可爬取性 | 说明 |
+|------|----------|------|
+| Anthropic | ✅ 可以 | 标准博客，有公开页面 |
+| LangChain | ✅ 可以 | 标准博客，有公开页面 |
+| Microsoft | ✅ 可以 | 标准博客，有公开页面 |
+| Jina | ✅ 可以 | 标准博客，有公开页面 |
+| OpenAI | ✅ 可以 | 标准博客，有公开页面 |
+| 微信公众号 (mp.weixin.qq.com) | ✅ 可用但有限制 | 通过 Tavily Web Search 发现公众号当天文章 URL，再按文章页发布时间和正文抽取结果过滤昨天内容；适合每日自动化增量抓取 |
 
-建议字段：
-- `name`：来源名称
-- `url`：博客首页、RSS、Atom 或文章列表页
-- `type`：`rss` / `atom` / `html` / `sitemap`
-- `tags`：如 `engineering`、`ai`、`infra`
-- `enabled`：是否启用
+### 订阅源列表
 
-### 2. 每晚定时检查更新
+**国外工程博客**（可爬取）:
+- [Anthropic工程博客](https://www.anthropic.com/engineering)
+- [LangChain博客](https://blog.langchain.com)
+- [Microsoft研究博客](https://www.microsoft.com/en-us/research/blog/)
+- [Jina新闻](https://jina.ai/news)
+- [OpenAI公司公告](https://openai.com/news/company-announcements/)
 
-新增定时任务服务，默认每天晚上运行一次。
+**微信公众号**（可自动抓取，作为重点来源）:
+- [阿里云开发者](https://mp.weixin.qq.com/s/bl77_Mb85C4AKe8h4__V6Q)
+- [大淘宝技术](https://mp.weixin.qq.com/s/b7iygA6YIqFJ-b9Yr3EzHA)
+- [得物技术](https://mp.weixin.qq.com/s/lvcH96VS6dgKvrrk4sQgDA)
+- [火山引擎](https://mp.weixin.qq.com/s/Fi51gTsAMp3h0VftECRDCQ)
+- [快手技术](https://mp.weixin.qq.com/s/Bxjh9Kj4n_y4E5gJGRhoRA)
+- [腾讯技术工程](https://mp.weixin.qq.com/s/ri_lxDGayM-e5A0oAW59Fw)
+- [腾讯云开发者](https://mp.weixin.qq.com/s/Laz4W0180y9yGW0b6EpUMQ)
+- [小红书技术](https://mp.weixin.qq.com/s/cAxohCGF2mpYBn5rU3S1Ew)
+- [字节跳动技术团队](https://mp.weixin.qq.com/s/mbvoeTuDR-lJ_u1TYw6-FQ)
+- [美团技术团队](https://mp.weixin.qq.com/s/LuCy56KRYk4W-USpDUViyg)
+- [百度geek说](https://mp.weixin.qq.com/s/tpUKOGBouUmRYEnSu1PaDQ)
 
-执行流程：
-- 读取 `config/blog_sources.yaml`
-- 对每个来源调用 `src/ai/web_search_agent.py` 或其 provider 能力获取最新文章列表
-- 和本地状态表比对 URL、标题、发布时间或内容 hash
-- 只处理未见过或已变化的文章
-- 把抓取结果落到 `data/raw/`，保留来源、发布时间、URL 和摘要
+### 日记模板（参考）
 
-### 3. 抓取正文与摘要
+文件路径: `.claude/templates/daily.md`
 
-优先复用现有 Web Search 能力：
-- `WebSearchAgent.extract(urls)`：抓取指定文章正文
-- `WebSearchAgent.map(url)`：必要时从站点生成 URL 列表
-- Open-WebSearch MCP provider：用于搜索/发现更新
-- Tavily API provider：用于 extract/crawl/map 等网页读取能力
+```markdown
+# 每日记录
 
-摘要输出建议包含：
-- 标题
-- 原文 URL
-- 发布时间或发现时间
-- 核心观点
-- 对工程实践的启发
-- 是否适合写入 `## 工程博客`
+## 科研
+-
 
-### 4. 生成当天日记草稿
+## 工程博客
+[标题](URL)：一句话摘要
+嵌套思考（无缩进）
 
-在抓取完成后调用现有日记生成链路：
-- 如果当天日记不存在，创建 `data/diary/<月日>.md`
-- 如果当天日记已存在，只追加或更新 `## 工程博客` 段落
-- 条目格式保持当前模板：`[标题](URL)：一句话摘要`
-- 原始抓取内容保留在 `data/raw/`，日记中只写精炼摘要
 
-### 5. 去重和可追踪
+## others
 
-需要保存抓取状态，避免每天重复写入同一篇文章。
+-
+```
 
-可选方案：
-- 新增 SQLite 表，如 `blog_source_state` / `blog_article`
-- 或先用 `data/raw/blog_index.json` 做 MVP 状态文件
+### 实现方案
 
-状态字段建议：
-- `source_name`
-- `article_url`
-- `title`
-- `published_at`
-- `content_hash`
-- `first_seen_at`
-- `last_seen_at`
-- `diary_path`
+**调度**: 每天北京时间凌晨 4 点触发一次定时任务（Codex `/loop` 或系统 `cron` 均可）。
+
+**工作流**:
+1. 读取固定订阅源配置，区分 `blog`、`rss`、`wechat` 三类来源
+2. 对国外工程博客/RSS 源抓取列表页或 feed，筛选昨天 00:00-23:59（北京时间）之间的新文章
+3. 对微信公众号先用 Tavily Web Search 发现 `mp.weixin.qq.com/s/...` 文章 URL，再按文章页发布时间和正文抽取结果过滤昨天内容
+4. 对命中的微信公众号文章，优先抓取正文并抽取全文；如果正文抽取失败，则回退到 Tavily 搜索返回的标题和摘要
+5. 用 LLM 生成「标题 + 链接 + 一句话摘要 + 嵌套思考」，并按来源去重
+6. 按日期写入 `data/diary/{月日}.md`，追加到 `## 工程博客` 段落
+7. 同步落盘一份原始抓取结果到 `data/raw/wechat/{YYYY-MM-DD}.json`，便于回溯和补抓
+
+**输出格式**（参考 `.claude/templates/daily.md`）:
+```markdown
+## 工程博客
+[标题](URL)：一句话摘要
+嵌套思考（无缩进）
+```
+
+### Codex 实施要点
+
+| 步骤 | 内容 |
+|------|------|
+| 1 | 创建 `scripts/fetch_blogs.py`，统一读取工程博客、RSS 和微信公众号配置 |
+| 2 | 为微信公众号接入 Tavily URL 发现，按昨天时间窗过滤文章页发布时间 |
+| 3 | 对命中的新文章抓正文并生成摘要，正文失败时自动降级到标题/摘要 |
+| 4 | 按日期写入 `data/diary/{月日}.md`，追加到 `## 工程博客` 段落 |
+| 5 | 将每次抓取结果写入 `data/raw/wechat/`，防止公众号临时链接过期后无法追溯 |
+| 6 | 设置每日凌晨定时任务，保证“昨天内容”按自然日稳定入库 |
+
+### 自动化方案对比
+
+#### 方案 A：脚本 + LLM API + 服务器 cron
+
+- 定时任务在服务器上直接跑 `scripts/fetch_blogs.py`
+- 抓取、筛选、正文提取、摘要生成都由 Python 脚本完成
+- LLM 仅负责把抓到的内容整理成更自然的摘要和思考
+- 优点：链路短、易排查、部署简单
+- 缺点：推理和修正能力主要依赖脚本本身，复杂场景需要手工补逻辑
+
+#### 方案 B：skill + Codex 定时任务
+
+- 由 Codex 按 `blog-diary-fetch` skill 的工作约定执行
+- skill 负责配置、抓取、摘要、写入和原始结果落盘
+- 可以借助 Codex 的分析和多步执行能力处理异常来源和文本整理
+- 优点：对复杂网页和规则变化更灵活，适合边跑边修
+- 缺点：需要 Codex 运行环境和任务调度支持，整体链路比纯脚本更重
+
+**最终决策**:
+- 方案 A（`脚本 + LLM API + cron`）作为最终生产方案
+- 方案 B（`skill + Codex` 定时任务）保留为开发、调试、补抓和回归验证工具
+- `blog-diary-fetch` skill 继续用于手动验证抓取链路、补抓指定日期和修复规则变化
+
+**服务器落地建议**:
+1. 服务器上只需要一个 cron 入口，定时执行仓库根目录的 `scripts/fetch_blogs.py`
+2. 先同步仓库到最新，再在仓库根目录手动跑一次 dry-run：
+   - `cd /path/to/DeepMemo`
+   - `uv run python scripts/fetch_blogs.py --config config/blog_sources.yaml --dry-run --json`
+3. dry-run 通过后，再切正式写入：
+   - `cd /path/to/DeepMemo`
+   - `uv run python scripts/fetch_blogs.py --config config/blog_sources.yaml --json`
+4. cron 里不要再拆第二个“生成日记脚本”，抓取、摘要、写入已经封装在同一个入口里
+5. 如果服务器上的代码还停留在旧版搜狗链路，先把根目录 `src/app/core/blog_fetcher.py` 同步到 Tavily-only + 日记生成的最终版，再上线 cron
+6. 如果服务器使用 `uv` 管理项目环境，cron 直接调用 `uv run python scripts/fetch_blogs.py --config config/blog_sources.yaml --json` 即可；不要让 cron 自己拼抓取逻辑
+7. 定时任务执行时必须保证工作目录是仓库根目录，否则 `config/blog_sources.yaml`、`config/web_search.yaml` 和 `data/diary/` 的相对路径会失效
+8. 建议给 cron 命令补上日志重定向，方便排障：
+   - `cd /path/to/DeepMemo && uv run python scripts/fetch_blogs.py --config config/blog_sources.yaml --json >> logs/blog-diary-fetch.log 2>&1`
+
+**当前代码现状**:
+- `.agents/skills/blog-diary-fetch/` 里的 skill 版本已经验证过 Tavily-only 抓取 + LLM 摘要 + 写日记链路
+- 根目录生产入口已经存在，但生产核心逻辑还需要和 skill 版本再对齐一次，避免服务器跑到旧逻辑
+
+### 最终方案
+
+**调度**: 在服务器上用 `cron` 定时触发脚本，不依赖本地 Codex 或交互式任务。
+
+**生产链路**:
+1. `cron` 定时执行抓取脚本，读取公众号和工程博客配置
+2. 脚本优先通过 Tavily 发现公众号当天文章 URL，抓取正文并落盘原始结果
+3. LLM API 负责把已抓到的标题、摘要、正文整理成日记文案
+4. 脚本按日期写入 `data/diary/{月日}.md`
+5. 抓取失败时只影响单条来源，warning 单独记录，不中断整批任务
+
+**角色分工**:
+- `scripts/fetch_blogs.py`: 生产执行入口
+- `config/blog_sources.yaml`: 来源配置
+- `config/web_search.yaml`: Tavily 配置
+- `blog-diary-fetch skill`: 开发、补抓、调试、回归验证
+
+**决策理由**:
+- 生产任务要求稳定、低依赖、可运维
+- cron + 脚本比交互式 agent 更容易做重试、监控和审计
+- Codex skill 在处理规则变化、补抓和排障时仍然有价值，但不作为主调度
 
 **涉及位置**:
-- `src/ai/web_search_agent.py` - 复用 web search / extract / crawl / map 能力
-- `src/ai/providers/open_websearch.py` - 通过 MCP 搜索或发现更新
-- `src/routers/diary.py` - 复用或扩展日记草稿生成能力
-- `src/app/database.py` - 可选：新增博客抓取状态表
-- `config/blog_sources.yaml` - 新增工程博客订阅源配置
-- `data/raw/` - 保存抓取正文和摘要素材
-- `data/diary/` - 生成或更新当日日记
+- `scripts/fetch_blogs.py` - 新增
+- `data/diary/{月日}.md` - 按日期写入
+- `data/raw/wechat/{YYYY-MM-DD}.json` - 原始抓取结果缓存
+- `.claude/templates/daily.md` - 参考模板
 
 **决策人**: gzy
-**状态**: 待确认
+**状态**: 待实现（由 Codex 执行）
 
 ## 4. 切换为 OpenAI Agent SDK
 
@@ -295,4 +395,3 @@ MVP 阶段保持现有 API 接口不变，内部替换为 Agent SDK：
 
 **决策人**: gzy
 **状态**: 待确认
-
