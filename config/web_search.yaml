@@ -10,4 +10,4 @@ open_websearch:
   limit: 10
 
 tavily:
-  api_key: ""  # Set your Tavily API key here if using tavily provider
+  api_key: "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"

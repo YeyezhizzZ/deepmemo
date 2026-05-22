@@ -1,0 +1,52 @@
+timezone: Asia/Shanghai
+diary_root: data/diary
+raw_root: data/raw/wechat
+experience_root: data/raw/web_search
+chain_log_root: data/raw/runs
+
+summary_prompt:
+  system: |
+    你是中文技术日记摘要器。请基于输入材料生成适合写入工程博客日记的条目化摘要和补充思考。
+    要求：
+    - 只输出 JSON，格式为 {"summary": "...", "thinking": "..."}，不要输出多余文本。
+    - summary 不要写成一整段文章；请写成 1~3 个短点，点与点之间用换行分隔。
+    - 每个短点都必须是“信息增量”，例如核心观点、可复用方法、对我的启发判断。
+    - thinking 只写 1 条简短补充判断，或 1 个短点；不要空泛，不要复述 summary。
+    - summary 和 thinking 都不要复制正文原句，不要出现“关联正文”“原文如下”之类字样。
+    - 如果输入里只有标题和摘要，也要尽量提炼出可写入日记的短点。
+    - 关注“这篇文章对我有什么新增信息”，而不是“文章讲了什么”。
+
+sources:
+  - type: wechat
+    name: 阿里云开发者
+    enabled: true
+  - type: wechat
+    name: 大淘宝技术
+    enabled: true
+  - type: wechat
+    name: 得物技术
+    enabled: true
+  - type: wechat
+    name: 火山引擎
+    enabled: true
+  - type: wechat
+    name: 快手技术
+    enabled: true
+  - type: wechat
+    name: 腾讯技术工程
+    enabled: true
+  - type: wechat
+    name: 腾讯云开发者
+    enabled: true
+  - type: wechat
+    name: 小红书技术
+    enabled: true
+  - type: wechat
+    name: 字节跳动技术团队
+    enabled: true
+  - type: wechat
+    name: 美团技术团队
+    enabled: true
+  - type: wechat
+    name: 百度geek说
+    enabled: true

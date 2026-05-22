@@ -124,6 +124,119 @@
    - 参考 Claude Code 的 mcp 工具调用方式
    - 保持与现有 duckduckgo-search 脚本的接口兼容
 
+## 经验沉淀机制
+
+这套机制的目标不是“每次都把搜索跑出来”，而是把每次搜索、抓取、过滤和回退的表现沉淀下来，让下一次在相似场景里直接复用历史经验。
+
+### 1. 统一接口
+
+- 对上层只暴露一个结构化入口
+- 输入是 `query`、`source_name`、`date_window`、`search_scope`
+- 输出不是一堆原始文本，而是结构化证据包：
+  - 命中的 URL 列表
+  - 已解析正文
+  - 发布时间
+  - 失败 warning
+  - 这次最终采用的策略
+
+### 2. 场景分析
+
+每次搜索前先显式记录场景特征，避免把“公众号文章发现”和“通用网页搜索”混为一谈。
+
+建议记录：
+- 任务类型：公众号文章发现 / 工程博客发现 / 深度网页抓取
+- 来源类型：微信公众号 / 博客 / RSS / 通用搜索
+- 时间窗口：昨天、最近 24 小时、指定日期
+- query 风格：公众号名、关键词、带日期、带站点限定
+- 复杂度：单篇、批量、是否需要正文补抓
+- 约束：是否必须只保留 `mp.weixin.qq.com/s/...`
+
+### 3. 经验记忆
+
+每次执行都落一条经验记录，后续先查经验再搜。
+
+建议字段：
+- `query_signature`
+- `source_name`
+- `provider`
+- `query_variant`
+- `candidate_count`
+- `url_match_count`
+- `published_date_hit_rate`
+- `page_fetch_success_rate`
+- `latency_ms`
+- `warnings`
+- `final_strategy`
+
+经验可以先落在 JSONL 或 SQLite：
+- MVP：`data/raw/web_search/experience.jsonl`
+- 稳定后：SQLite 表，便于按公众号名、日期窗、query variant 做聚合分析
+
+### 4. 策略路由
+
+系统不应该每次从 0 决定怎么搜，而应该根据场景特征和历史经验选策略。
+
+公众号场景推荐的路由逻辑：
+- 公众号名明确时，优先 `site:mp.weixin.qq.com/s/ "公众号名"`
+- 命中率不足时，再补 `公众号名 + 微信公众号`
+- 仍不足时，再补日期窗口 query
+- Tavily 有 `published_date` 时优先用它
+- 没有 `published_date` 时再读文章页发布时间
+
+### 5. 检索器池
+
+把真正执行搜索的能力当成一个“检索器池”，而不是一个固定函数。
+
+可包含：
+- Tavily 搜索
+- Brave Search
+- 站内页抓取
+- 文章页正文抽取
+- RSS / feed 解析
+
+公众号场景里，检索器池的最小闭环是：
+1. Tavily 发现文章 URL
+2. 微信文章页抓正文
+3. 时间校验
+4. 摘要生成
+
+### 6. 结果打包
+
+不要把原始搜索结果直接抛给上层。上层拿到的应该是一个“证据包”。
+
+建议结构：
+- `selected_urls`
+- `selected_articles`
+- `fallback_used`
+- `warnings`
+- `raw_snapshot_path`
+- `experience_record_path`
+
+这样下次就可以：
+- 先看历史上同类公众号用哪个 query variant 命中率最高
+- 先看哪种检索器最稳定
+- 先看正文抓取失败是不是集中在某类站点
+
+### 7. 对公众号抓取的具体经验
+
+- 输入是公众号名，不是主页 URL
+- 优先搜索文章页 `mp.weixin.qq.com/s/...`，不要依赖 `profile_url`
+- 同一公众号保留多个 query variant，但最终结果必须按 URL 去重
+- 只保留昨天窗口内的文章
+- 正文抓取失败时允许降级到摘要，但要记录 warning
+- 每次抓取都保留 raw 结果，方便回溯和补抓
+
+### 8. 为什么要沉淀经验
+
+因为不同公众号、不同时间窗口、不同搜索引擎的最优策略不一样。
+
+系统如果不沉淀经验，就会每次重新做一次“我要怎么搜”的推理；
+一旦经验沉淀下来，Agent 或脚本就可以直接复用：
+- 哪个 query variant 更准
+- 哪个 provider 更稳
+- 哪个时间窗更容易命中
+- 哪类文章页更容易抓到正文
+
 ## 参考链接
 
 - Brave Search API: https://api.search.brave.com/app/documentation/web-search/get-started

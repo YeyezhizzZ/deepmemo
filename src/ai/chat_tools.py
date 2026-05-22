@@ -27,19 +27,21 @@ class ChatTool:
 
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-SKILLS_ROOT = REPO_ROOT / ".claude" / "skills"
+SKILLS_ROOT = REPO_ROOT / ".agents" / "skills"
 
 
 CHAT_TOOLS: dict[str, ChatTool] = {
-    "khazix-writer": ChatTool(
-        id="khazix-writer",
-        name="技术写作",
-        description="按卡兹克风格生成公众号长文、改稿、续写",
+    "blog-diary-fetch": ChatTool(
+        id="blog-diary-fetch",
+        name="每日博客抓取",
+        description="自动抓取预定义工程博客和微信公众号，生成日记草稿",
         execution_type="inline",
-        skill_dir=SKILLS_ROOT / "khazix-writer",
+        skill_dir=SKILLS_ROOT / "blog-diary-fetch",
         reference_paths=(
-            "references/content_methodology.md",
-            "references/style_examples.md",
+            "config/blog_sources.yaml",
+            "subagent-template.md",
+            "scripts/fetch_blogs.py",
+            "src/app/core/blog_fetcher.py",
         ),
     ),
     "hv-analysis": ChatTool(
