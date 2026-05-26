@@ -1,8 +1,10 @@
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, File, Form, HTTPException, UploadFile
 from pydantic import BaseModel
 from typing import Optional
 
+from src.app.core.asset_manager import save_image_asset
 from src.app.core.fs_manager import (
+    DATA_DIR,
     read_file_content,
     write_file_content,
     move_file,
@@ -108,3 +110,36 @@ def create_directory_api(data: CreateDirRequest):
         raise HTTPException(status_code=409, detail=str(e))
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/upload-asset")
+async def upload_asset(
+    source_path: str = Form(...),
+    files: list[UploadFile] = File(..., alias="file[]"),
+):
+    """保存 Markdown 图片附件，并返回 Vditor 可识别的上传结果。"""
+    succ_map = {}
+    err_files = []
+
+    for upload in files:
+        filename = upload.filename or "image.png"
+        try:
+            result = save_image_asset(
+                data_dir=DATA_DIR,
+                source_path=source_path,
+                original_filename=filename,
+                content_type=upload.content_type or "",
+                content=await upload.read(),
+            )
+            succ_map[filename] = result["markdown_path"]
+        except ValueError:
+            err_files.append(filename)
+
+    return {
+        "code": 0,
+        "msg": "",
+        "data": {
+            "errFiles": err_files,
+            "succMap": succ_map,
+        },
+    }

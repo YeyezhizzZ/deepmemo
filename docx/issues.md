@@ -395,3 +395,49 @@ MVP 阶段保持现有 API 接口不变，内部替换为 Agent SDK：
 
 **决策人**: gzy
 **状态**: 待确认
+
+## 6. Diary 缺少图片存储与展示能力
+
+**类型**: 功能
+**状态**: 已完成
+
+**问题描述**: 当前 Markdown 笔记，尤其是 diary，缺少稳定的图片上传、存储、引用和展示链路，导致日记、idea 等文件中无法保存截图、配图或其他视觉资料。
+
+**目标**:
+- 支持在 diary 编辑/生成流程中插入图片
+- 将图片保存到仓库内可管理的位置，而不是只依赖外部临时链接
+- 在 Markdown 中生成可追踪、可迁移的本地图片引用
+- 问答、Wiki 编译和后续摘要流程能识别图片所在的日记来源，至少不破坏现有文本链路
+
+**涉及位置**:
+- `data/diary/` - 日记 Markdown 需要支持本地图片引用
+- `app/src/App.tsx` - diary 编辑界面需要支持图片插入/粘贴/上传入口
+- `src/routers/diary.py` - 后端 diary 写入流程需要处理图片元数据或附件路径
+- `src/app/core/fs_manager.py` - 文件树和读写规则需要允许图片资源目录
+- `config/` - 建议新增或扩展附件存储路径配置
+
+**初步方案**:
+- 图片统一保存到 `data/assets/diary/YYYY-MM-DD/`，不混入 `data/diary/` Markdown 目录
+- 非 diary Markdown 文件按源文件路径保存到 `data/assets/<source-without-md>/`，例如 `ideas/DeepMemo.md` 保存到 `data/assets/ideas/DeepMemo/`
+- Markdown 中保存可迁移的相对路径，例如 `![说明](../assets/diary/2026-05-26/example.png)`
+- 浏览器预览通过后端静态路由 `/assets/diary/YYYY-MM-DD/example.png` 访问同一份本地文件
+- 前端接入 Vditor 的粘贴/拖拽上传能力，不额外做图库
+- 后端负责落盘、重名处理、路径规范化、图片类型和大小校验
+
+**路径决策**:
+- 物理路径：`data/assets/diary/YYYY-MM-DD/<timestamp>-<safe-name>.<ext>`
+- 非 diary 物理路径：`data/assets/<source-without-md>/<timestamp>-<safe-name>.<ext>`
+- Markdown 引用路径：相对当前日记文件计算，例如 `data/diary/0526.md` 引用 `../assets/diary/2026-05-26/20260526-153012-screenshot.png`
+- 静态访问路径：`/assets/diary/YYYY-MM-DD/<filename>`
+- 日期来源：优先从日记文件名解析 `MMDD.md` 或 `MDD.md`，年份使用当前 diary 年份；无法解析时回退到当天日期
+- 非 diary 示例：`data/ideas/DeepMemo.md` 引用 `../assets/ideas/DeepMemo/20260526-160203-architecture.png`
+
+**实现 TODO（每步含验证）**:
+- [x] 后端新增 asset 路径构造与文件名规范化函数。验证：运行单元测试，确认 `diary/0526.md` 会生成 `assets/diary/2026-05-26/...`，Markdown 路径为 `../assets/...`。
+- [x] 后端新增 `/api/fs/upload-asset`，接收 Vditor multipart 上传并返回 `succMap`。验证：运行接口测试或用 `curl` 上传 PNG，确认文件写入 `data/assets/diary/...` 且响应可被 Vditor 识别。
+- [x] FastAPI 挂载 `/assets` 静态目录。验证：上传后访问 `/assets/diary/YYYY-MM-DD/<filename>` 返回图片内容。
+- [x] 前端 Vditor 配置上传 URL、图片类型限制和当前日记路径。验证：`npm run build` 通过，手动粘贴/拖拽图片后 Markdown 插入相对路径。
+- [x] Vite dev server 代理 `/assets` 到后端。验证：开发环境中相对图片路径能在编辑器内预览。
+- [x] 回归文件树和 Markdown 读写。验证：`data/assets` 可出现在文件树中，但图片不会被当作文本 Markdown 编辑；保存 diary 不破坏已有内容。
+
+**决策人**: gzy

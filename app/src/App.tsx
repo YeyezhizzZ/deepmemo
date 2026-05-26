@@ -258,10 +258,12 @@ function formatEditorMarkdown(value: string): string {
 }
 
 function VditorMarkdownEditor({
+  sourcePath,
   value,
   onChange,
   onSave,
 }: {
+  sourcePath: string;
   value: string;
   onChange: (value: string) => void;
   onSave: () => void;
@@ -293,6 +295,16 @@ function VditorMarkdownEditor({
       cache: { enable: false },
       toolbar: [],
       counter: { enable: false },
+      upload: {
+        url: '/api/fs/upload-asset',
+        fieldName: 'file[]',
+        multiple: true,
+        accept: 'image/png,image/jpeg,image/gif,image/webp,image/svg+xml',
+        max: 10 * 1024 * 1024,
+        extraData: {
+          source_path: sourcePath,
+        },
+      },
       preview: {
         markdown: {
           autoSpace: true,
@@ -643,6 +655,8 @@ function EditorContent({
         <div className="editor-pane editor-pane--live">
           <div className="editor-pane__label">Markdown</div>
           <VditorMarkdownEditor
+            key={activeFile?.path ?? 'empty-editor'}
+            sourcePath={activeFile?.path ?? 'diary/untitled.md'}
             value={value}
             onChange={onChange}
             onSave={onSave}

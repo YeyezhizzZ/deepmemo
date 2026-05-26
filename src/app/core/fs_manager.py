@@ -181,6 +181,8 @@ def scan_directory_tree(base_path: str = "") -> list:
                 "children": scan_directory_tree(rel_path)
             })
         else:
+            if item.suffix.lower() != ".md":
+                continue
             result.append({
                 "name": item.name,
                 "path": rel_path,

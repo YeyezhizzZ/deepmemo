@@ -4,6 +4,7 @@ from datetime import datetime
 from pathlib import Path
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from src.ai.service import knowledge_qa_service
@@ -18,6 +19,7 @@ from src.routers.chat import router as chat_router
 
 app = FastAPI(title="DeepMemo API", version="0.2.0")
 DATA_DIR = Path(__file__).resolve().parents[2] / "data"
+app.mount("/assets", StaticFiles(directory=DATA_DIR / "assets", check_dir=False), name="assets")
 
 app.add_middleware(
     CORSMiddleware,
