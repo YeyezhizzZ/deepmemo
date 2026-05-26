@@ -15,6 +15,7 @@ from src.routers.diary import router as diary_router
 from src.routers.pulse import router as pulse_router
 from src.routers.citations import router as citations_router
 from src.routers.chat import router as chat_router
+from src.routers.wiki import router as wiki_router
 
 
 app = FastAPI(title="DeepMemo API", version="0.2.0")
@@ -142,6 +143,7 @@ app.include_router(diary_router)
 app.include_router(pulse_router)
 app.include_router(citations_router)
 app.include_router(chat_router)
+app.include_router(wiki_router)
 
 
 # --- Session APIs ---
