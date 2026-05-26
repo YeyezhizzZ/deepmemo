@@ -396,6 +396,63 @@ MVP 阶段保持现有 API 接口不变，内部替换为 Agent SDK：
 **决策人**: gzy
 **状态**: 待确认
 
+## 5. Wiki 从每日记录升级为知识编译器
+
+**类型**: 架构升级 / 功能
+**状态**: 进行中
+
+**问题描述**: 当前 Wiki 不应该继续以“每日记录 = 一个 wiki 页面”为基本粒度，而应该参考 `reference/llm_wiki/llm_wiki` 的设计，把 `data/diary/**/*.md` 作为原始证据层，编译成稳定的 `entity / concept / synthesis` 知识页，再基于这些知识页构建图谱与社区。
+
+**目标**:
+- 让 Wiki 成为“知识编译器”，而不是日记镜像
+- 从日记中提炼高频、可复用、可追溯的知识节点
+- 让图谱和社区基于知识页而不是按天分散的日记页
+- 后续支持手动定义知识社区，再自动扩展相关页面
+
+**参考设计**:
+- `reference/llm_wiki/llm_wiki/README.md` 的核心思路是：
+  - 原始资料层与 wiki 知识层分离
+  - wiki 页面是稳定知识资产，不是原始记录的逐日拷贝
+  - ingest / query / lint / graph 是主链路
+  - 图谱、社区、insights 是围绕知识页组织的维护能力
+
+**当前已完成的相关工作**:
+- `src/wiki/ingest.py`
+  - 已接入 `data/diary/**/*.md` 作为输入
+  - 已把 ingest 改成“日记分析 -> 知识页汇总 -> `data/wiki/**/*.md` 写出”
+  - 已加入增量缓存和去重
+  - 已将 `source` 视为证据层，不再作为主 wiki 页面批量落盘
+- `src/wiki/graph.py`
+  - 已改为读取 `data/wiki/**/*.md` 做页面级图谱
+  - 已用 `wikilink + sources + common neighbor + type affinity` 计算边
+  - 已接入 Louvain 社区检测
+  - 已补噪声过滤，避免文件名、目录名、停用词污染知识节点
+- `src/routers/wiki.py`
+  - 已新增 `/wiki/rebuild`，可从后端触发 `data/diary -> data/wiki` 重建
+  - 已保留 `/wiki/graph` 作为图谱数据入口
+- 前端
+  - 已有独立 `Wiki` Workspace
+  - 已接入社区图谱 + 节点详情
+  - 已支持前端触发 Wiki 重建并刷新图谱
+- 文档
+  - 已在 `docx/frontend/frontend_v3.md` 里补充 Wiki Workspace 与重建链路说明
+
+**遗留问题**:
+- 当前知识页仍有一部分 term 噪声，需要继续收紧词抽取和页面筛选
+- 目前社区仍偏向单大簇，后续需要更强的社区定义策略
+- 需要支持“手动定义知识社区 -> 自动扩展相关节点”的配置模式
+- 需要把知识页生成进一步从“term 采样”推进到“稳定实体 / 概念编译”
+
+**涉及位置**:
+- `reference/llm_wiki/llm_wiki/README.md` - 参考项目设计
+- `src/wiki/ingest.py` - diary -> wiki 编译
+- `src/wiki/graph.py` - page-level graph + community detection
+- `src/routers/wiki.py` - rebuild / graph API
+- `app/src/App.tsx` - Wiki Workspace UI
+- `docx/frontend/frontend_v3.md` - 前端方案说明
+
+**决策人**: gzy
+
 ## 6. Diary 缺少图片存储与展示能力
 
 **类型**: 功能

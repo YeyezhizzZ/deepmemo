@@ -2,7 +2,7 @@
 
 ## 目标
 
-定时获取 AI HOT 每日精选资讯，数据落地到 `data/ai_hot/`。
+定时获取 AI HOT 每日精选资讯，数据落地到 `data/raw/daily/`。
 
 ---
 
@@ -131,12 +131,14 @@ curl -H "User-Agent: $UA" -H 'If-None-Match: W/"items-d0112022d1961325"' \
 ## 数据目录
 
 ```
-data/ai_hot/
+data/raw/
 └── daily/
     └── MMD.md        # 月日命名，如 57.md（省略每位前置0）
 ```
 
-日报 JSON 只作为同步过程中的临时文件：先落地到 `data/ai_hot/daily/{YYYY-MM-DD}.json`，本地 Python 渲染出 `MMD.md` 后立即删除。
+日报 JSON 只作为同步过程中的临时文件：先落地到 `data/raw/daily/{YYYY-MM-DD}.json`，本地 Python 渲染出 `MMD.md` 后立即删除。
+
+这里的 `raw/daily` 就是 DeepMemo 的每日 AI 新闻原始层。它不再挂在 `ai_hot/` 下面，避免多一层语义包装。
 
 ## 获取逻辑 `src/ai/ai_hot_agent.py`
 
@@ -144,11 +146,11 @@ data/ai_hot/
 
 1. **获取最新日报** `fetch_daily()`
    - 调用 `GET /api/public/daily`
-   - 写入临时文件 `data/ai_hot/daily/{YYYY-MM-DD}.json`
+   - 写入临时文件 `data/raw/daily/{YYYY-MM-DD}.json`
 
 2. **渲染 Markdown** `render_daily_markdown(json_path)`
    - 读取本地日报 JSON
-   - 写入 `data/ai_hot/daily/MMD.md`
+   - 写入 `data/raw/daily/MMD.md`
 
 3. **日常同步** `sync_daily()` / CLI `sync`
    - 拉取日报 JSON
@@ -174,7 +176,7 @@ UA = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML,
 
 ### 服务器 Cron 定时
 
-由全天运行的服务器负责每日同步。服务器目录与本地 DeepMemo 目录共享，因此服务器生成 `data/ai_hot/daily/MMD.md` 后，本地电脑会通过共享目录自动看到 Markdown 文件。
+由全天运行的服务器负责每日同步。服务器目录与本地 DeepMemo 目录共享，因此服务器生成 `data/raw/daily/MMD.md` 后，本地电脑会通过共享目录自动看到 Markdown 文件。
 
 本地电脑不运行 cron，避免本地和服务器同时写同一个 Markdown 文件。
 
@@ -207,8 +209,8 @@ uv run python src/ai/ai_hot_agent.py sync
 ```json
 {
   "date": "2026-05-08",
-  "jsonPath": "data/ai_hot/daily/2026-05-08.json",
-  "markdownPath": "data/ai_hot/daily/58.md",
+  "jsonPath": "data/raw/daily/2026-05-08.json",
+  "markdownPath": "data/raw/daily/58.md",
   "deletedJson": true
 }
 ```
@@ -216,13 +218,13 @@ uv run python src/ai/ai_hot_agent.py sync
 此时服务器目录应只保留 Markdown：
 
 ```sh
-find data/ai_hot -maxdepth 3 -type f | sort
+find data/raw -maxdepth 3 -type f | sort
 ```
 
 预期：
 
 ```text
-data/ai_hot/daily/58.md
+data/raw/daily/58.md
 ```
 
 4. 配置服务器 crontab。

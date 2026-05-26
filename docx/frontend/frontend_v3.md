@@ -1,5 +1,15 @@
 # V3 前端设计文档
 
+## 目标
+
+V3 的前端不再只是一个编辑器页面，而是一个面向知识生产的工作台。它需要同时支持三类核心任务：
+
+1. `Editor`：编辑原始 Markdown 文件，完成写作、整理、重构。
+2. `QA`：围绕已有内容提问、追问、回溯证据。
+3. `Wiki`：浏览、筛选、审核、合并和发布结构化知识。
+
+因此，前端应采用 **Workspace 切换** 的组织方式，而不是把 Wiki 仅仅做成编辑器里的一个子标签。
+
 ## 背景：为什么从自制 contenteditable 切换到 Vditor
 
 此前 DeepMemo 前端使用自制 `contenteditable` 实现 Markdown 编辑功能。但在实际使用中，自制方案遇到了三类难以解决的底层问题：
@@ -12,6 +22,61 @@ Codex 协助排查后，建议采用 **Vditor** 的 WYSIWYG 内核——一个�
 
 ---
 
+## Workspace 总设计
+
+### 顶层入口
+
+顶层只保留三个平级 Workspace：
+
+| Workspace | 作用 | 典型任务 |
+|---|---|---|
+| `Editor` | 文件级写作与修改 | 新建、重命名、补写、格式化、AI 润色 |
+| `QA` | 会话式问答与证据回溯 | 提问、追问、查看引用、跳转到证据 |
+| `Wiki` | 知识库浏览与维护 | 搜索、查看页面、合并、拆分、审核、发布 |
+
+这里的关键是：
+
+- `Editor` 和 `QA` 是任务模式，回答的是“我现在要做什么”。
+- `Wiki` 是知识模式，回答的是“我已经沉淀了什么、怎么维护、怎么复用”。
+- 三者应该平级，不要把 Wiki 藏在 Editor 里，否则它会退化成另一个文档视图。
+
+### 全局布局
+
+建议采用统一骨架：
+
+```text
+Top Bar
+  ├── Workspace Switcher
+  ├── 全局搜索入口
+  └── 状态 / 刷新 / 同步信息
+
+Left Sidebar
+  ├── 当前 Workspace 导航
+  ├── 树 / 列表 / 会话 / 页面索引
+  └── 筛选与快捷入口
+
+Center Workspace
+  ├── 主内容区
+  └── 当前对象的详情 / 编辑 / 预览
+
+Right Context Panel
+  ├── 引用 / 证据
+  ├── 相关页 / backlinks
+  ├── 审核动作
+  └── 变更历史
+```
+
+### Workspace 切换规则
+
+- 切换 Workspace 不应销毁全局状态，只切换主内容和左侧导航内容。
+- `Editor`、`QA`、`Wiki` 共享同一个应用壳。
+- 当前对象需要保留最近访问状态，例如：
+  - `Editor` 保留上一个文件
+  - `QA` 保留上一个会话
+  - `Wiki` 保留上一个页面或筛选条件
+
+---
+
 ## 核心改动概览
 
 | 文件 | 改动 |
@@ -20,6 +85,8 @@ Codex 协助排查后，建议采用 **Vditor** 的 WYSIWYG 内核——一个�
 | `app/src/App.tsx:260` | 新增 `VditorMarkdownEditor` 组件 |
 | `app/src/App.tsx:644` | 编辑器区域替换为 `<VditorMarkdownEditor>` |
 | `app/src/styles.css:528` | Vditor 容器样式，让其填满编辑区 |
+| `app/src/App.tsx` | 增加 `Wiki` Workspace 的主视图与状态切换 |
+| `app/src/styles.css` | 补充 Wiki 列表、详情、证据面板的布局样式 |
 
 ---
 
@@ -258,6 +325,173 @@ cd app && npm run dev
 确认点：
 1. 编辑器能正常输入中文（输入法选词不丢失）
 2. 切换文件后内容正确更新（`setValue` 生效）
+
+---
+
+## Wiki Workspace 设计
+
+### 设计目标
+
+Wiki Workspace 不是“文档阅读器”，而是一个知识图谱工作台。它必须支持：
+
+- 先按知识社区进入，再在社区内看图
+- 快速看到社区规模、主题和健康度
+- 在图里定位相关节点
+- 在右侧查看节点信息、来源与关联
+- 发现重复、冲突、孤儿节点，并逐步沉淀为稳定知识资产
+
+### Wiki 的核心模型
+
+Wiki Workspace 以“知识社区”为一级入口，图谱数据直接来自 `data/wiki/**/*.md`：
+
+- 一个知识社区对应一张局部图谱
+- 社区内部节点高度相关
+- 社区之间弱相关或不相关
+- 图谱节点是稳定的 wiki 页面，类型主要是 `source / entity / concept / synthesis`
+- 社区是用户的认知入口，节点是用户的操作对象
+
+建议数据模型如下：
+
+| 对象 | 作用 |
+|---|---|
+| `community` | 一个知识社区，承载局部图谱的入口和摘要 |
+| `node` | 图谱中的节点，对应稳定的 wiki 页面 |
+| `edge` | 节点之间的关系边 |
+| `source` | 节点背后的 raw / diary 原始 Markdown |
+| `status` | 节点和社区的维护状态 |
+
+图谱构建信号参考 `reference/llm_wiki/llm-wiki-skill` 的四信号模型：
+
+- `direct link`：显式链接或直接引用
+- `source overlap`：共享的 diary 支持来源
+- `Adamic-Adar`：共同邻居带来的结构相似度
+- `type affinity`：source / entity / concept 的类型亲和度
+
+前端不需要自己重算这些信号，只消费后端返回的 `GET /wiki/graph` 结果。
+
+### Wiki 内部结构
+
+Wiki Workspace 内部建议分成三个主视图：
+
+| 子视图 | 作用 |
+|---|---|
+| `Communities` | 左侧社区列表，中间图谱，右侧节点详情，默认入口 |
+| `Search` | 全局检索标题、正文、标签、来源、别名，并定位到社区和节点 |
+| `Review` | 处理待审核节点、冲突节点、低置信度节点 |
+
+### 页面布局
+
+默认路径建议是：
+
+1. 进入 `Wiki`
+2. 左侧显示知识社区列表
+3. 中间显示当前社区图谱
+4. 右侧显示当前选中节点的信息
+
+```text
+WikiWorkspace
+  ├── Left: Communities
+  ├── Center: Community Graph
+  └── Right: Node Detail
+```
+
+### 知识社区列表展示字段
+
+每个社区在左侧至少展示：
+
+- `title`
+- `summary`
+- `node_count`
+- `edge_count`
+- `updated_at`
+- `top_tags`
+
+如果空间允许，再显示：
+
+- `hub_nodes`
+- `health`
+- `confidence`
+
+### 图谱中心视图
+
+中间区域只负责展示当前社区图谱：
+
+- 节点按关系布局
+- 选中节点高亮
+- 邻居节点弱高亮
+- 不同类型节点用不同颜色和大小
+- 图谱支持缩放、平移和节点点击
+
+### 节点详情页结构
+
+右侧面板只负责当前选中节点的信息：
+
+- `title`
+- `type`
+- `status`
+- `summary`
+- `sources`
+- `related`
+- `backlinks`
+- `tags`
+- `last_updated`
+- 操作按钮：`Edit`、`Merge`、`Split`、`Promote`、`Archive`
+
+### Wiki 与 Editor / QA 的关系
+
+- `Editor` 负责生产原始内容。
+- `QA` 负责围绕内容做问答，产出证据链和临时结论。
+- `Wiki` 负责把稳定知识编译成社区和图谱。
+
+三者之间应该互相跳转：
+
+- 从 `QA` 的引用卡跳到 `Wiki` 的节点或 source
+- 从 `Wiki` 的节点跳回 raw 文件或原始会话
+- 从 `Editor` 中选中的文件跳到对应的 Wiki 节点
+
+这能保证系统不是三个孤岛，而是一条连续的知识流水线。
+
+---
+
+## 实现顺序建议
+
+### 第 1 步：先把 Workspace 壳做出来
+
+- 顶部加入 `Editor / QA / Wiki` 切换器
+- 保留当前编辑器和问答功能
+- 新增 `Wiki` 的占位视图
+
+### 第 2 步：实现知识社区列表
+
+- 从 `GET /wiki/graph` 读取完整图谱
+- 图谱由后端基于 `data/wiki/**/*.md` 构建
+- 社区由后端基于页面级图谱和 Louvain / fallback 聚类得到，而不是前端硬算 connected components
+- 左侧按社区展示，而不是按页面展示
+
+### 第 3 步：实现社区图谱
+
+- 中间区域只显示当前社区内的局部图
+- 节点支持点击、缩放、平移
+- 节点选中后更新右侧详情
+
+### 第 4 步：实现节点详情
+
+- 支持查看 summary、body、sources、related、backlinks
+- 右侧显示节点证据链和操作入口
+- 支持从节点详情跳转到 wiki 页面或原始 diary 源文件
+
+### 第 5 步：实现 Review 与 Search
+
+- Review 用于冲突节点、待审核节点、低置信度节点
+- Search 用于跨社区检索和快速定位入口
+
+### 第 6 步：把 Wiki 与 Ingest 接起来
+
+- 能从 raw 或 source 触发生成
+- 能从前端触发 `data/diary -> data/wiki` 的重建，并重新拉取图谱
+- 生成结果是“高频知识页”而不是“每日记录页”：daily diary 只作为 evidence，wiki 页面由 recurring entities / concepts / syntheses 组成
+- 能刷新 index / overview / log
+- 能对生成结果做人工确认和发布
 3. Ctrl/Cmd+S 触发保存（后端收到请求）
 4. Slash command (`/`) 和 entity mention (`@`) 浮层正常弹出
 5. `npm run build` 无报错
