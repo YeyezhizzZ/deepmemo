@@ -60,7 +60,7 @@ def _repo_root() -> Path:
     return Path(__file__).resolve().parents[2]
 
 
-DATA_DIR = _repo_root() / "data" / "ai_hot"
+RAW_DATA_DIR = _repo_root() / "data" / "raw"
 
 
 class AIHotError(RuntimeError):
@@ -76,12 +76,6 @@ class FetchResult:
     data: Any
     status: int
     etag: str | None = None
-
-
-@dataclass(frozen=True)
-class WriteResult:
-    path: Path | None
-    count: int
 
 
 @dataclass(frozen=True)
@@ -144,13 +138,11 @@ class AIHotAgent:
         self,
         *,
         client: AIHotClient | None = None,
-        data_dir: Path | str = DATA_DIR,
+        data_dir: Path | str = RAW_DATA_DIR,
     ) -> None:
         self.client = client or AIHotClient()
         self.data_dir = Path(data_dir)
         self.daily_dir = self.data_dir / "daily"
-        self.items_dir = self.data_dir / "items"
-        self.index_dir = self.data_dir / "index"
 
     def fetch_daily(
         self,
@@ -191,43 +183,18 @@ class AIHotAgent:
         self,
         *,
         take: int = 30,
-        write: bool = True,
     ) -> dict[str, Any]:
         take = _validate_take(take, maximum=180)
         result = self.client.get("/api/public/dailies", {"take": take})
-        data = result.data if isinstance(result.data, dict) else {"dailies": result.data}
-
-        if write:
-            _write_json(self.index_dir / "dailies.json", data)
-
-        return data
+        return result.data if isinstance(result.data, dict) else {"dailies": result.data}
 
     def fetch_items(
         self,
         since: str | datetime | date | None = None,
         category: str | None = None,
         query: str | None = None,
-        *,
-        write: bool = True,
-        output_date: str | date | None = None,
     ) -> list[dict[str, Any]]:
-        items = self.fetch_all_items(since=since, category=category, query=query)
-
-        if write:
-            path = self._items_json_path(output_date)
-            self._merge_items_file(
-                path,
-                items,
-                metadata={
-                    "fetchedAt": _utc_now_iso(),
-                    "mode": "selected",
-                    "since": _format_since_arg(since),
-                    "category": category,
-                    "q": query,
-                },
-            )
-
-        return items
+        return self.fetch_all_items(since=since, category=category, query=query)
 
     def fetch_all_items(
         self,
@@ -299,12 +266,6 @@ class AIHotAgent:
             deleted_json=deleted_json,
         )
 
-    def latest_item_since(self) -> str | None:
-        latest = self._latest_local_item_time()
-        if not latest:
-            return None
-        return _format_since_arg(latest - timedelta(seconds=1))
-
     def _daily_json_path(self, daily: dict[str, Any], fallback_date: str | None = None) -> Path:
         date_value = daily.get("date") or fallback_date or date.today().isoformat()
         return self.daily_dir / f"{date_value}.json"
@@ -312,47 +273,6 @@ class AIHotAgent:
     def _daily_markdown_path(self, daily: dict[str, Any], fallback_date: str | None = None) -> Path:
         date_value = daily.get("date") or fallback_date or date.today().isoformat()
         return self.daily_dir / f"{_mmd_from_iso_date(date_value)}.md"
-
-    def _items_json_path(self, output_date: str | date | None = None) -> Path:
-        date_value = _format_date_arg(output_date) or date.today().isoformat()
-        return self.items_dir / f"{date_value}.json"
-
-    def _merge_items_file(
-        self,
-        path: Path,
-        items: list[dict[str, Any]],
-        *,
-        metadata: dict[str, Any],
-    ) -> WriteResult:
-        existing = _read_items_payload(path)
-        by_id: dict[str, dict[str, Any]] = {}
-        anonymous_index = 0
-
-        for item in existing + items:
-            item_id = item.get("id")
-            if not item_id:
-                anonymous_index += 1
-                item_id = f"anonymous-{anonymous_index}-{item.get('url') or item.get('title')}"
-            by_id[str(item_id)] = item
-
-        merged_items = _sort_items(list(by_id.values()))
-        payload = {
-            **metadata,
-            "count": len(merged_items),
-            "items": merged_items,
-        }
-        _write_json(path, payload)
-        return WriteResult(path=path, count=len(merged_items))
-
-    def _latest_local_item_time(self) -> datetime | None:
-        latest: datetime | None = None
-        for path in sorted(self.items_dir.glob("*.json")):
-            for item in _read_items_payload(path):
-                published_at = _parse_datetime(item.get("publishedAt"))
-                if published_at and (latest is None or published_at > latest):
-                    latest = published_at
-        return latest
-
 
 def fetch_daily(
     target_date: str | date | None = None,
@@ -369,10 +289,8 @@ def render_daily_markdown(json_path: Path | str) -> Path:
 def fetch_items(
     since: str | datetime | date | None = None,
     category: str | None = None,
-    *,
-    write: bool = True,
 ) -> list[dict[str, Any]]:
-    return AIHotAgent().fetch_items(since=since, category=category, write=write)
+    return AIHotAgent().fetch_items(since=since, category=category)
 
 
 def fetch_all_items(
@@ -439,20 +357,6 @@ def _ensure_utc(value: datetime) -> datetime:
     return value.astimezone(timezone.utc)
 
 
-def _parse_datetime(value: Any) -> datetime | None:
-    if not isinstance(value, str) or not value:
-        return None
-    try:
-        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
-    except ValueError:
-        return None
-    return _ensure_utc(parsed)
-
-
-def _utc_now_iso() -> str:
-    return datetime.now(timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z")
-
-
 def _normalize_item(item: dict[str, Any]) -> dict[str, Any]:
     return {field: item.get(field) for field in ITEM_FIELDS}
 
@@ -469,24 +373,6 @@ def _sort_items(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
         key=lambda item: item.get("publishedAt") or "",
         reverse=True,
     )
-
-
-def _read_items_payload(path: Path) -> list[dict[str, Any]]:
-    if not path.exists():
-        return []
-    try:
-        data = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
-        return []
-
-    if isinstance(data, list):
-        items = data
-    elif isinstance(data, dict):
-        items = data.get("items") or []
-    else:
-        items = []
-
-    return [_normalize_item(item) for item in items if isinstance(item, dict)]
 
 
 def _read_json(path: Path) -> Any:
@@ -616,7 +502,7 @@ def _path_for_print(path: Path | None) -> str | None:
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description="Fetch AI HOT public data into data/ai_hot.")
+    parser = argparse.ArgumentParser(description="Fetch AI HOT public data into data/raw/daily.")
     subparsers = parser.add_subparsers(dest="command", required=True)
 
     daily_parser = subparsers.add_parser("daily", help="Fetch latest or specified daily JSON.")
@@ -627,15 +513,13 @@ def build_parser() -> argparse.ArgumentParser:
     render_parser.add_argument("json_path", help="Path to daily JSON.")
     render_parser.add_argument("--delete-json", action="store_true", help="Delete JSON after successful render.")
 
-    items_parser = subparsers.add_parser("items", help="Fetch selected items.")
+    items_parser = subparsers.add_parser("items", help="Fetch selected items without writing files.")
     items_parser.add_argument("--since", help="ISO datetime or YYYY-MM-DD.")
     items_parser.add_argument("--category", choices=sorted(CATEGORIES))
     items_parser.add_argument("--q", help="Keyword search.")
-    items_parser.add_argument("--dry-run", action="store_true", help="Fetch but do not write files.")
 
     dailies_parser = subparsers.add_parser("dailies", help="Fetch daily archive index.")
     dailies_parser.add_argument("--take", type=int, default=30, help="Number of archive records, max 180.")
-    dailies_parser.add_argument("--dry-run", action="store_true", help="Fetch but do not write files.")
 
     sync_parser = subparsers.add_parser("sync", help="Fetch daily JSON, render MMD.md, then delete JSON.")
     sync_parser.add_argument("--date", help="Daily date in YYYY-MM-DD format.")
@@ -685,13 +569,12 @@ def main(argv: list[str] | None = None) -> int:
                 since=args.since,
                 category=args.category,
                 query=args.q,
-                write=not args.dry_run,
             )
             _print_json({"count": len(items)})
             return 0
 
         if args.command == "dailies":
-            data = agent.fetch_dailies(take=args.take, write=not args.dry_run)
+            data = agent.fetch_dailies(take=args.take)
             count = (
                 len(data.get("dailies") or data.get("items") or data)
                 if isinstance(data, dict)

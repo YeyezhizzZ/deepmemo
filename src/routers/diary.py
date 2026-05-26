@@ -16,14 +16,18 @@ class AutoDraftRequest(BaseModel):
 
 @router.post("/auto-draft")
 def auto_draft(request: AutoDraftRequest):
-    """扫描 data/raw/ 下最新的文件，调用 LLM 生成日记草稿，返回给前端审核"""
+    """扫描 data/raw/ 下最新的 Markdown 文件，调用 LLM 生成日记草稿，返回给前端审核"""
     try:
         raw_path = DATA_DIR / request.raw_dir
         if not raw_path.exists():
             raise HTTPException(status_code=404, detail=f"Directory not found: {request.raw_dir}")
 
-        # 获取最新的 .md 文件
-        md_files = sorted(raw_path.glob("*.md"), key=lambda p: p.stat().st_mtime, reverse=True)
+        # 递归扫描 raw 目录，兼容 ai_hot 这类子目录化的爬取结果
+        md_files = sorted(
+            (path for path in raw_path.rglob("*.md") if path.is_file()),
+            key=lambda p: p.stat().st_mtime,
+            reverse=True,
+        )
         if not md_files:
             return {"message": "No raw files found", "draft": ""}
 

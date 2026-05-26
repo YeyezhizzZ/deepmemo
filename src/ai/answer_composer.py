@@ -1,5 +1,5 @@
 from src.ai.chat_tools import ChatTool, build_tool_system_block
-from src.ai.types import Evidence, LocalSearchResult, RouteDecision, WebSearchResult
+from src.ai.types import LocalSearchResult, RouteDecision, WebSearchResult
 
 
 class AnswerComposer:
@@ -72,8 +72,8 @@ class AnswerComposer:
 
         try:
             response = self.llm_service.chat(messages)
-            content = self._prepend_job_status(response.choices[0].message.content, tool)
-            return self._append_references(content, local_result)
+            content = self._strip_generated_references(response.choices[0].message.content).strip()
+            return self._prepend_job_status(content, tool)
         except Exception as exc:
             return self._compose_fallback(local_result, exc)
 
@@ -159,9 +159,6 @@ class AnswerComposer:
                 if chunk:
                     emitted = True
                     yield chunk
-            references = self._format_reference_section(local_result)
-            if references:
-                yield "\n\n" + references
         except Exception as exc:
             if emitted:
                 return
@@ -174,8 +171,9 @@ class AnswerComposer:
                 "你是 DeepMemo 的个人知识库问答助手。"
                 "请基于给定的对话历史和本地知识库证据回答；如果证据不足，明确说不足。"
                 "回答使用中文，结论要简洁。"
-                "来自本地知识库证据的相关句子后必须使用 [1]、[2] 这样的数字引用，数字来自证据编号。"
-                "不要输出引用列表，系统会自动追加可点击引用块。"
+                "在回答正文中，用 [1]、[2] 等标号引用对应的证据片段，标号顺序与证据列表一致。"
+                "不要输出引用列表或引用区块，只需在正文中使用标号即可。"
+                "引用证据会由系统单独记录，不要把它们拼进正文。"
                 "不要把外部常识包装成用户知识库里的内容。"
             )
 
@@ -185,8 +183,8 @@ class AnswerComposer:
                     "你是 DeepMemo 的个人知识库助手。"
                     "本轮需要结合用户问题、对话历史、本地知识库证据和所选 Chat Tool 指令回答。"
                     "回答使用中文。"
-                    "本地知识库证据中的相关事实后必须使用 [1]、[2] 这样的数字引用，数字来自证据编号。"
-                    "不要输出引用列表，系统会自动追加可点击引用块。"
+                    "在回答正文中，用 [1]、[2] 等标号引用对应的证据片段，标号顺序与证据列表一致。"
+                    "不要输出引用列表或引用区块，只需在正文中使用标号即可。"
                     "不要把缺少证据的外部事实包装成用户知识库里的内容。"
                 ),
                 build_tool_system_block(tool),
@@ -239,7 +237,8 @@ class AnswerComposer:
 
         try:
             response = self.llm_service.chat(messages)
-            return self._prepend_job_status(response.choices[0].message.content, tool)
+            content = self._strip_generated_references(response.choices[0].message.content).strip()
+            return self._prepend_job_status(content, tool)
         except Exception as exc:
             return "\n".join(
                 [
@@ -550,23 +549,7 @@ class AnswerComposer:
         return "\n".join(parts)
 
     def _compose_fallback(self, local_result: LocalSearchResult, exc: Exception) -> str:
-        lines = [
-            "LLM 生成暂时失败，先返回本地检索到的证据摘要。",
-            f"错误：{exc}",
-            "",
-        ]
-        for source_index, item in enumerate(local_result.evidence, start=1):
-            lines.append(f"证据 {source_index}: {item.path}:{item.start_line}-{item.end_line}")
-            lines.append(f"  {item.excerpt.splitlines()[0]}")
-        return self._append_references("\n".join(lines), local_result)
-
-    def _append_references(self, content: str, local_result: LocalSearchResult) -> str:
-        if not local_result.evidence:
-            return content
-
-        answer = self._strip_generated_references(content).rstrip()
-        references = self._format_reference_section(local_result)
-        return "\n\n".join([answer, references]) if answer else references
+        return f"LLM 调用失败：{exc}"
 
     def _strip_generated_references(self, content: str) -> str:
         markers = (
@@ -613,23 +596,6 @@ class AnswerComposer:
 
         if pending:
             yield pending
-
-    def _format_reference_section(self, local_result: LocalSearchResult) -> str:
-        blocks = ["## 引用"]
-        for index, item in enumerate(local_result.evidence, start=1):
-            blocks.append(self._format_reference_item(index, item))
-        return "\n\n".join(blocks)
-
-    def _format_reference_item(self, index: int, item: Evidence) -> str:
-        query = item.query.replace("\n", " ").strip()
-        header = f"[{index}] {item.path}:{item.start_line}-{item.end_line}"
-        if query:
-            header = f"{header} (query={query})"
-
-        excerpt_lines = item.excerpt.splitlines()[:6]
-        blocks = [header]
-        blocks.extend(f"> {line}" for line in excerpt_lines)
-        return "\n".join(blocks)
 
     def _normalize_history(self, history: list[dict]) -> list[dict]:
         normalized: list[dict] = []

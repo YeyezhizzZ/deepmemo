@@ -11,7 +11,6 @@ from src.models.schemas import ChatRequest, ChatToolResponse, MessageResponse
 
 router = APIRouter(prefix="/chat", tags=["chat"])
 MAX_HISTORY_MESSAGES = 20
-MAX_HISTORY_CITATIONS = 4
 MAX_SUMMARY_ITEMS = 12
 
 
@@ -70,26 +69,25 @@ def build_session_topic(user_message: str, ai_content: str) -> str:
     seed = " ".join(user_message.split())
     if not seed:
         seed = " ".join(strip_generated_references(ai_content).split())
-    if len(seed) > 60:
-        seed = f"{seed[:60]}..."
-    return f"用户询问：{seed}" if seed else ""
+    seed = seed.strip()
+    if len(seed) > 12:
+        seed = f"{seed[:12]}..."
+    return seed
 
 
-def update_session_topic_if_empty(session_id: str, user_message: str, ai_content: str):
+def update_session_topic(session_id: str, user_message: str, ai_content: str):
     topic = build_session_topic(user_message, ai_content)
     if not topic:
         return
 
     conn = get_db_connection()
     cursor = conn.cursor()
-    row = cursor.execute("SELECT session_topic FROM session WHERE session_id = ?", (session_id,)).fetchone()
-    if row and not (row["session_topic"] or "").strip():
-        now = datetime.now().isoformat()
-        cursor.execute(
-            "UPDATE session SET session_topic = ?, updated_at = ? WHERE session_id = ?",
-            (topic, now, session_id),
-        )
-        conn.commit()
+    now = datetime.now().isoformat()
+    cursor.execute(
+        "UPDATE session SET session_topic = ?, updated_at = ? WHERE session_id = ?",
+        (topic, now, session_id),
+    )
+    conn.commit()
     conn.close()
 
 
@@ -133,28 +131,6 @@ def strip_generated_references(content: str) -> str:
     return content
 
 
-def build_citation_summary(citations_json: str | None) -> str:
-    try:
-        citations = json.loads(citations_json or "[]")
-    except json.JSONDecodeError:
-        return ""
-
-    paths: list[str] = []
-    seen: set[str] = set()
-    for citation in citations:
-        path = str(citation.get("file_path") or citation.get("evidence_id") or "").strip()
-        if not path or path in seen:
-            continue
-        paths.append(path)
-        seen.add(path)
-        if len(paths) >= MAX_HISTORY_CITATIONS:
-            break
-
-    if not paths:
-        return ""
-    return "引用摘要：" + "；".join(paths)
-
-
 def build_llm_messages(session_id: str, *, max_messages: int = MAX_HISTORY_MESSAGES) -> list[dict]:
     conn = get_db_connection()
     cursor = conn.cursor()
@@ -179,9 +155,6 @@ def build_llm_messages(session_id: str, *, max_messages: int = MAX_HISTORY_MESSA
             content = row["content"]
             if role == "assistant":
                 content = strip_generated_references(content).strip()
-                citation_summary = build_citation_summary(row["citations"])
-                if citation_summary:
-                    content = f"{content}\n\n{citation_summary}".strip()
             messages.append({"role": role, "content": content})
     conn.close()
     return messages
@@ -231,7 +204,7 @@ def chat(request: ChatRequest):
     message_ids.append(ai_msg_id)
 
     update_session_message_ids(request.session_id, message_ids)
-    update_session_topic_if_empty(request.session_id, request.user_message, ai_content)
+    update_session_topic(request.session_id, request.user_message, ai_content)
     update_session_summary(request.session_id, message_ids)
 
     return MessageResponse(
@@ -278,7 +251,7 @@ async def chat_stream(request: ChatRequest):
             )
             message_ids.append(ai_msg_id)
             update_session_message_ids(request.session_id, message_ids)
-            update_session_topic_if_empty(request.session_id, request.user_message, full_content)
+            update_session_topic(request.session_id, request.user_message, full_content)
             update_session_summary(request.session_id, message_ids)
             yield format_sse_event({"type": "done", "message": saved_message})
         except Exception as exc:
@@ -330,7 +303,6 @@ def get_file_references(path: str):
     """获取引用了指定文件的所有消息"""
     conn = get_db_connection()
     cursor = conn.cursor()
-
     rows = cursor.execute("""
         SELECT m.message_id, m.session_id, m.role, m.content, m.created_at,
                s.session_name

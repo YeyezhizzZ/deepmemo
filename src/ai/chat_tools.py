@@ -31,19 +31,6 @@ SKILLS_ROOT = REPO_ROOT / ".agents" / "skills"
 
 
 CHAT_TOOLS: dict[str, ChatTool] = {
-    "blog-diary-fetch": ChatTool(
-        id="blog-diary-fetch",
-        name="每日博客抓取",
-        description="自动抓取预定义工程博客和微信公众号，生成日记草稿",
-        execution_type="inline",
-        skill_dir=SKILLS_ROOT / "blog-diary-fetch",
-        reference_paths=(
-            "config/blog_sources.yaml",
-            "subagent-template.md",
-            "scripts/fetch_blogs.py",
-            "src/app/core/blog_fetcher.py",
-        ),
-    ),
     "hv-analysis": ChatTool(
         id="hv-analysis",
         name="深度研究",
