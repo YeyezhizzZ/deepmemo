@@ -43,6 +43,8 @@ import {
   getHealth,
   getChatTools,
   getMessageCitations,
+  getWikiGraph,
+  rebuildWiki,
   listMessages,
   listSessions,
   moveFile,
@@ -51,7 +53,18 @@ import {
   updateFileSyncStatus,
   writeFile,
 } from './api';
-import type { ChatMessage, ChatTool, Citation, FileReference, FsNode, Session, SyncStatus } from './types';
+import type {
+  ChatMessage,
+  ChatTool,
+  Citation,
+  FileReference,
+  FsNode,
+  Session,
+  SyncStatus,
+  WikiGraph,
+  WikiGraphNode,
+  WikiCommunity,
+} from './types';
 
 const exampleQuestions = [
   'DeepMemo 的产品想法是什么？',
@@ -59,8 +72,14 @@ const exampleQuestions = [
   '我关于 LLM-Spine 记录了哪些想法？',
 ];
 
-type WorkspaceMode = 'editor' | 'qa';
+type WorkspaceMode = 'editor' | 'qa' | 'wiki';
 type FileNode = FsNode;
+
+type SourcePanelItem = SourceChunk & {
+  messageId: string;
+  evidenceId?: string;
+  modified?: string;
+};
 
 type SourceChunk = {
   index: number;
@@ -72,17 +91,6 @@ type SourceChunk = {
   excerpt: string;
 };
 
-type SourcePanelItem = SourceChunk & {
-  messageId: string;
-  evidenceId?: string;
-  modified?: string;
-};
-
-type ParsedMarkdown = {
-  bodyLines: string[];
-  sources: SourceChunk[];
-};
-
 function trimTrailingBlankLines(lines: string[]): string[] {
   const next = [...lines];
   while (next.length > 0 && next[next.length - 1].trim() === '') {
@@ -91,66 +99,21 @@ function trimTrailingBlankLines(lines: string[]): string[] {
   return next;
 }
 
-function parseMarkdownWithSources(content: string): ParsedMarkdown {
-  const lines = content.split('\n');
-  const referenceIndex = lines.findIndex((line) => line.trim() === '## 引用');
-  if (referenceIndex === -1) {
-    return { bodyLines: lines, sources: [] };
-  }
-
-  const sourceHeaderPattern =
-    /^\[(\d+)\]\s+(.+):(\d+)-(\d+)(?:\s+·\s+score=([0-9.]+))?(?:(?:\s+·\s+query=(.*))|(?:\s+\(query=(.*)\)))?\s*$/;
-  const sources: SourceChunk[] = [];
-  let current: SourceChunk | undefined;
-
-  const pushCurrent = () => {
-    if (current) {
-      sources.push({
-        ...current,
-        excerpt: trimTrailingBlankLines(current.excerpt.split('\n')).join('\n'),
-      });
-    }
-  };
-
-  for (const rawLine of lines.slice(referenceIndex + 1)) {
-    const line = rawLine.trimEnd();
-    const match = sourceHeaderPattern.exec(line);
-    if (match) {
-      pushCurrent();
-      const parsedScore = match[5] ? Number(match[5]) : undefined;
-      current = {
-        index: Number(match[1]),
-        path: match[2],
-        startLine: Number(match[3]),
-        endLine: Number(match[4]),
-        score: parsedScore !== undefined && Number.isFinite(parsedScore) ? parsedScore : undefined,
-        query: match[6] ?? match[7],
-        excerpt: '',
-      };
-      continue;
-    }
-
-    if (current && line.trim().startsWith('>')) {
-      const excerptLine = line.trim().replace(/^>\s?/, '');
-      current.excerpt = current.excerpt ? `${current.excerpt}\n${excerptLine}` : excerptLine;
-    }
-  }
-  pushCurrent();
-
-  if (sources.length === 0) {
-    return { bodyLines: lines, sources: [] };
-  }
-
-  return {
-    bodyLines: trimTrailingBlankLines(lines.slice(0, referenceIndex)),
-    sources,
-  };
+function sortSessionsByUpdatedAt(sessions: Session[]): Session[] {
+  return [...sessions].sort((a, b) => Date.parse(b.updatedAtIso) - Date.parse(a.updatedAtIso));
 }
 
 function scoreLevel(score?: number): 'high' | 'medium' | 'low' {
   if (score === undefined || score < 0.5) return 'low';
   if (score < 0.75) return 'medium';
   return 'high';
+}
+
+function stripLegacyReferenceSection(content: string): string {
+  const lines = content.split('\n');
+  const referenceIndex = lines.findIndex((line) => line.trim() === '## 引用' || line.trim() === '### 引用' || line.trim() === '## 参考' || line.trim() === '### 参考');
+  if (referenceIndex === -1) return content;
+  return trimTrailingBlankLines(lines.slice(0, referenceIndex)).join('\n');
 }
 
 function createOptimisticUserMessage(sessionId: string, content: string): ChatMessage {
@@ -218,6 +181,95 @@ function countNodes(nodes: FileNode[]): { files: number; folders: number } {
     },
     { files: 0, folders: 0 },
   );
+}
+
+function formatWikiType(type: string): string {
+  const map: Record<string, string> = {
+    source: 'Source',
+    entity: 'Entity',
+    concept: 'Concept',
+    synthesis: 'Synthesis',
+    query: 'Query',
+  };
+  return map[type] ?? type;
+}
+
+type WikiNodeLayout = {
+  path: string;
+  x: number;
+  y: number;
+  size: number;
+};
+
+function normalizeWikiPath(path: string): string {
+  return path.replace(/^data\//, '').replace(/^\/+/, '').trim();
+}
+
+function buildWikiGraph(graph: WikiGraph): WikiGraph {
+  return graph;
+}
+
+function getCommunityNodes(graph: WikiGraph, communityId?: string): WikiGraphNode[] {
+  if (!communityId) return [];
+  return graph.nodes
+    .filter((node) => node.communityId === communityId)
+    .sort((a, b) => {
+      const byDegree = b.degree - a.degree;
+      if (byDegree !== 0) return byDegree;
+      return a.title.localeCompare(b.title, 'zh-Hans-CN');
+    });
+}
+
+function layoutCommunityNodes(nodes: WikiGraphNode[], selectedPath?: string): WikiNodeLayout[] {
+  if (nodes.length === 0) return [];
+  const ordered = [...nodes].sort((a, b) => {
+    if (a.path === selectedPath) return -1;
+    if (b.path === selectedPath) return 1;
+    const byDegree = b.degree - a.degree;
+    if (byDegree !== 0) return byDegree;
+    return a.title.localeCompare(b.title, 'zh-Hans-CN');
+  });
+  const center = ordered.find((node) => node.path === selectedPath) ?? ordered[0];
+  const others = ordered.filter((node) => node.path !== center.path);
+  const layouts: WikiNodeLayout[] = [
+    { path: center.path, x: 50, y: 50, size: 22 },
+  ];
+  const rings = [
+    { radius: 22, count: Math.min(others.length, 6) },
+    { radius: 38, count: Math.min(Math.max(others.length - 6, 0), 10) },
+    { radius: 52, count: Math.max(others.length - 16, 0) },
+  ];
+  let offset = 0;
+  for (const ring of rings) {
+    const slice = others.slice(offset, offset + ring.count);
+    if (slice.length > 0) {
+      slice.forEach((node, index) => {
+        const angle = (Math.PI * 2 * index) / slice.length - Math.PI / 2;
+        const size = node.degree >= 4 ? 16 : node.degree >= 2 ? 14 : 12;
+        layouts.push({
+          path: node.path,
+          x: 50 + Math.cos(angle) * ring.radius,
+          y: 50 + Math.sin(angle) * ring.radius,
+          size,
+        });
+      });
+    }
+    offset += ring.count;
+  }
+  return layouts;
+}
+
+function getSelectedCommunity(graph: WikiGraph, activeCommunityId?: string, activePath?: string): WikiCommunity | undefined {
+  return (
+    graph.communities.find((community) => community.id === activeCommunityId)
+    ?? graph.communities.find((community) => community.nodePaths.includes(activePath ?? ''))
+    ?? graph.communities[0]
+  );
+}
+
+function getCommunityForNode(graph: WikiGraph, nodePath?: string): WikiCommunity | undefined {
+  if (!nodePath) return undefined;
+  return graph.communities.find((community) => community.nodePaths.includes(nodePath));
 }
 
 function findFirstFile(nodes: FileNode[]): FileNode | undefined {
@@ -339,15 +391,16 @@ function VditorMarkdownEditor({
     const editor = editorRef.current;
     if (!editor || latestValueRef.current === value) return;
     latestValueRef.current = value;
-    editor.setValue(value, true);
+    const normalized = value
+      .split('\n')
+      .map((line) => line.trimEnd())
+      .join('\n')
+      .replace(/\n{3,}/g, '\n\n')
+      .trimStart();
+    editor.setValue(normalized, true);
   }, [value]);
 
   return <div className="vditor-editor-host" ref={mountRef} />;
-}
-
-function getMessageSources(message?: ChatMessage): SourceChunk[] {
-  if (!message || message.role !== 'assistant') return [];
-  return parseMarkdownWithSources(message.content).sources;
 }
 
 function mapCitationsToSources(messageId: string, citations: Citation[]): SourcePanelItem[] {
@@ -360,10 +413,6 @@ function mapCitationsToSources(messageId: string, citations: Citation[]): Source
     evidenceId: citation.evidenceId,
     excerpt: citation.content,
   }));
-}
-
-function mapParsedSources(messageId: string, sources: SourceChunk[]): SourcePanelItem[] {
-  return sources.map((source) => ({ ...source, messageId }));
 }
 
 function StatusDot({ status }: { status?: SyncStatus }) {
@@ -383,82 +432,286 @@ function StatusDot({ status }: { status?: SyncStatus }) {
   );
 }
 
-function DataExplorer({
+function ModeSidebar({
+  mode,
   files,
+  sessions,
   activeFileId,
+  activeSessionId,
+  wikiGraph,
+  activeWikiNodeId,
+  activeWikiCommunityId,
   expanded,
+  wikiQuery,
   refreshing,
+  creating,
   onSelectFile,
   onToggleFolder,
   onRenameNode,
   onCreateFile,
   onCreateFolder,
   onRefresh,
+  onSelectSession,
+  onCreateSession,
+  onDeleteSession,
+  onSelectWikiNode,
+  onSelectWikiCommunity,
+  onChangeWikiQuery,
+  onRefreshWiki,
 }: {
+  mode: WorkspaceMode;
   files: FileNode[];
+  sessions: Session[];
   activeFileId?: string;
+  activeSessionId?: string;
+  wikiGraph: WikiGraph;
+  activeWikiNodeId?: string;
+  activeWikiCommunityId?: string;
   expanded: Set<string>;
+  wikiQuery: string;
   refreshing: boolean;
+  creating: boolean;
   onSelectFile: (id: string) => void;
   onToggleFolder: (id: string) => void;
   onRenameNode: (node: FileNode) => void;
   onCreateFile: () => void;
   onCreateFolder: () => void;
   onRefresh: () => void;
+  onSelectSession: (id: string) => void;
+  onCreateSession: () => void;
+  onDeleteSession: (id: string) => void;
+  onSelectWikiNode: (path: string) => void;
+  onSelectWikiCommunity: (communityId: string) => void;
+  onChangeWikiQuery: (value: string) => void;
+  onRefreshWiki: () => void;
 }) {
   const counts = useMemo(() => countNodes(files), [files]);
+  const sortedSessions = useMemo(() => sortSessionsByUpdatedAt(sessions), [sessions]);
+  const filteredCommunities = useMemo(() => {
+    const query = wikiQuery.trim().toLowerCase();
+    return wikiGraph.communities.filter((community) => {
+      if (!query) return true;
+      const nodeTitles = community.nodePaths
+        .map((path) => wikiGraph.nodeMap.get(path)?.title ?? '')
+        .join(' ')
+        .toLowerCase();
+      const haystack = [
+        community.title,
+        community.summary,
+        community.updatedAt,
+        ...community.topTags,
+        nodeTitles,
+      ]
+        .join(' ')
+        .toLowerCase();
+      return haystack.includes(query);
+    });
+  }, [wikiGraph, wikiQuery]);
+
+  // 按类型分组的wiki页面列表
+  const wikiNodesByType = useMemo(() => {
+    const query = wikiQuery.trim().toLowerCase();
+    const nodes = Array.from(wikiGraph.nodeMap.values());
+    const filtered = query
+      ? nodes.filter((node) => {
+          const haystack = [node.title, node.type, ...node.tags].join(' ').toLowerCase();
+          return haystack.includes(query);
+        })
+      : nodes;
+
+    const groups: Record<string, typeof filtered> = {};
+    for (const node of filtered) {
+      const type = node.type || 'other';
+      if (!groups[type]) groups[type] = [];
+      groups[type].push(node);
+    }
+    // 每组按title排序
+    for (const type of Object.keys(groups)) {
+      groups[type].sort((a, b) => a.title.localeCompare(b.title, 'zh-Hans-CN'));
+    }
+    return groups;
+  }, [wikiGraph, wikiQuery]);
+
+  const typeOrder = ['entity', 'concept', 'synthesis', 'source', 'query'];
+  const typeLabels: Record<string, string> = {
+    entity: '实体',
+    concept: '概念',
+    synthesis: '综合',
+    source: '来源',
+    query: '问答',
+  };
+
+  // 展开/折叠状态管理
+  const [expandedTypes, setExpandedTypes] = useState<Set<string>>(new Set(['entity', 'concept']));
+  const toggleTypeExpanded = (type: string) => {
+    setExpandedTypes((prev) => {
+      const next = new Set(prev);
+      if (next.has(type)) {
+        next.delete(type);
+      } else {
+        next.add(type);
+      }
+      return next;
+    });
+  };
 
   return (
     <aside className="data-explorer">
       <div className="data-explorer__header">
         <div className="brand">
-          <div className="brand__mark">D</div>
-          <div className="brand__copy">
-            <div className="brand__name">DeepMemo</div>
-            <div className="brand__env">Agent Workspace</div>
-          </div>
+          <div className="brand__name">DeepMemo</div>
         </div>
       </div>
 
-      <div className="explorer-toolbar" aria-label="资源操作">
-        <button type="button" title="新建文件" onClick={onCreateFile}>
-          <FilePlus2 size={16} />
-          <span>File</span>
-        </button>
-        <button type="button" title="新建文件夹" onClick={onCreateFolder}>
-          <FolderPlus size={16} />
-          <span>Folder</span>
-        </button>
-        <button type="button" title="刷新" onClick={onRefresh} disabled={refreshing}>
-          <RefreshCw size={16} className={refreshing ? 'spin' : ''} />
-        </button>
-      </div>
-
-      <nav className="file-tree" aria-label="data 文件树">
-        {files.map((node) => (
-          <FileTreeNode
-            key={node.id}
-            node={node}
-            level={0}
-            activeFileId={activeFileId}
-            expanded={expanded}
-            onSelectFile={onSelectFile}
-            onToggleFolder={onToggleFolder}
-            onRenameNode={onRenameNode}
-            onCreateFile={onCreateFile}
-          />
-        ))}
-      </nav>
-
-      <div className="data-explorer__footer">
-        <div className="storage-card">
-          <HardDrive size={16} />
-          <div>
-            <strong>38.4 MB</strong>
-            <span>{counts.files} files · {counts.folders} folders</span>
+      {mode === 'editor' ? (
+        <>
+          <div className="explorer-toolbar" aria-label="资源操作">
+            <button type="button" title="新建文件" onClick={onCreateFile}>
+              <FilePlus2 size={16} />
+              <span>File</span>
+            </button>
+            <button type="button" title="新建文件夹" onClick={onCreateFolder}>
+              <FolderPlus size={16} />
+              <span>Folder</span>
+            </button>
+            <button type="button" title="刷新" onClick={onRefresh} disabled={refreshing}>
+              <RefreshCw size={16} className={refreshing ? 'spin' : ''} />
+            </button>
           </div>
+
+          <nav className="file-tree" aria-label="data 文件树">
+            {files.map((node) => (
+              <FileTreeNode
+                key={node.id}
+                node={node}
+                level={0}
+                activeFileId={activeFileId}
+                expanded={expanded}
+                onSelectFile={onSelectFile}
+                onToggleFolder={onToggleFolder}
+                onRenameNode={onRenameNode}
+                onCreateFile={onCreateFile}
+              />
+            ))}
+          </nav>
+
+        </>
+      ) : mode === 'qa' ? (
+        <div className="chat-sidebar">
+          <div className="chat-sidebar__header">
+            <button
+              className="chat-sidebar__new-btn"
+              type="button"
+              onClick={onCreateSession}
+              disabled={creating}
+            >
+              <MessageSquarePlus size={16} />
+              <span>New chat</span>
+            </button>
+          </div>
+
+          <nav className="chat-sidebar__list" aria-label="会话列表">
+            {sortedSessions.length === 0 ? (
+              <div className="chat-sidebar__empty">
+                <MessageSquare size={18} />
+                <span>还没有会话</span>
+              </div>
+            ) : sortedSessions.map((session) => {
+              const isActive = session.sessionId === activeSessionId;
+              const rawTitle = session.sessionTopic?.trim() || session.sessionName;
+              const title = rawTitle.replace(/^用户询问[:：]\s*/, '');
+              return (
+                <div
+                  key={session.sessionId}
+                  className={`chat-sidebar__item ${isActive ? 'chat-sidebar__item--active' : ''}`}
+                >
+                  <button
+                    type="button"
+                    className="chat-sidebar__item-main"
+                    title={title}
+                    onClick={() => onSelectSession(session.sessionId)}
+                  >
+                    <MessageSquare size={16} className="chat-sidebar__item-icon" />
+                    <span className="chat-sidebar__item-text">{title}</span>
+                  </button>
+                  <button
+                    type="button"
+                    className="chat-sidebar__item-delete"
+                    title="删除会话"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onDeleteSession(session.sessionId);
+                    }}
+                  >
+                    <Trash2 size={14} />
+                  </button>
+                </div>
+              );
+            })}
+          </nav>
         </div>
-      </div>
+      ) : (
+        <>
+          <div className="explorer-toolbar explorer-toolbar--wiki" aria-label="Wiki 操作">
+            <button type="button" title="重建 Wiki（从 diary 重新编译）" onClick={onRefreshWiki} disabled={refreshing}>
+              <RefreshCw size={16} className={refreshing ? 'spin' : ''} />
+              <span>{refreshing ? '重建中' : '重建 Wiki'}</span>
+            </button>
+          </div>
+
+          <div className="wiki-filters">
+            <div className="search-box search-box--wiki">
+              <Database size={14} />
+              <input
+                value={wikiQuery}
+                onChange={(event) => onChangeWikiQuery(event.target.value)}
+                placeholder="搜索 Wiki 页面"
+                aria-label="搜索 Wiki 页面"
+              />
+            </div>
+          </div>
+
+          <nav className="wiki-list" aria-label="Wiki 页面列表">
+            {typeOrder.map((type) => {
+              const isExpanded = expandedTypes.has(type);
+              const nodes = wikiNodesByType[type] ?? [];
+              return (
+                <div key={type} className="wiki-type-group">
+                  <button
+                    type="button"
+                    className="wiki-type-group__header"
+                    onClick={() => toggleTypeExpanded(type)}
+                  >
+                    <span className="wiki-type-group__chevron">
+                      {isExpanded ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
+                    </span>
+                    <span className="wiki-type-group__label">{typeLabels[type] ?? type}</span>
+                    <span className="wiki-type-group__count">{nodes.length}</span>
+                  </button>
+                  {isExpanded && nodes.length === 0 && (
+                    <div className="wiki-type-group__empty">暂无内容</div>
+                  )}
+                  {isExpanded && nodes.map((node) => {
+                    const isActive = node.path === activeWikiNodeId;
+                    return (
+                      <button
+                        type="button"
+                        key={node.path}
+                        className={isActive ? 'wiki-item wiki-item--active' : 'wiki-item'}
+                        onClick={() => onSelectWikiNode(node.path)}
+                        title={node.title}
+                      >
+                        <span className={`wiki-item__badge wiki-item__badge--${node.type}`}>{typeLabels[node.type] ?? node.type}</span>
+                        <span className="wiki-item__title">{node.title}</span>
+                      </button>
+                    );
+                  })}
+                </div>
+              );
+            })}
+          </nav>
+        </>
+      )}
     </aside>
   );
 }
@@ -545,26 +798,51 @@ function FileTreeNode({
 
 function WorkspaceHeader({
   activeFile,
+  activeSession,
+  activeWikiCommunity,
+  activeWikiNode,
   mode,
   saving,
   onModeChange,
   onAiComplete,
   onSave,
   onFormat,
+  onCreateSession,
+  onRefresh,
+  onRefreshWiki,
 }: {
   activeFile?: FileNode;
+  activeSession?: Session;
+  activeWikiCommunity?: WikiCommunity;
+  activeWikiNode?: WikiGraphNode;
   mode: WorkspaceMode;
   saving: boolean;
   onModeChange: (mode: WorkspaceMode) => void;
   onAiComplete: () => void;
   onSave: () => void;
   onFormat: () => void;
+  onCreateSession: () => void;
+  onRefresh: () => void;
+  onRefreshWiki: () => void;
 }) {
+  const pathLabel =
+    mode === 'wiki'
+      ? activeWikiCommunity
+        ? activeWikiNode
+          ? `${activeWikiCommunity.title} · ${activeWikiNode.title}`
+          : activeWikiCommunity.title
+        : 'wiki/'
+      : mode === 'qa'
+        ? activeSession?.sessionName ?? '会话'
+        : activeFile
+          ? `data/${activeFile.path}`
+          : 'data/';
+
   return (
     <header className="workspace-header">
-      <div className="path-chip" title={activeFile?.path}>
+      <div className="path-chip" title={pathLabel}>
         <Database size={16} />
-        <span>{activeFile ? `data/${activeFile.path}` : 'data/'}</span>
+        <span>{pathLabel}</span>
       </div>
 
       <div className="mode-switch" aria-label="工作模式">
@@ -584,21 +862,39 @@ function WorkspaceHeader({
           <MessageSquare size={15} />
           问答模式
         </button>
+        <button
+          className={mode === 'wiki' ? 'mode-switch__button mode-switch__button--active' : 'mode-switch__button'}
+          type="button"
+          onClick={() => onModeChange('wiki')}
+        >
+          <Network size={15} />
+          Wiki
+        </button>
       </div>
 
       <div className="workspace-actions">
-        <button type="button" onClick={onAiComplete}>
-          <WandSparkles size={15} />
-          AI 补完
-        </button>
-        <button type="button" onClick={onSave} disabled={saving || !activeFile}>
-          <Check size={15} />
-          {saving ? '保存中' : '保存'}
-        </button>
-        <button type="button" onClick={onFormat}>
-          <Command size={15} />
-          格式化
-        </button>
+        {mode === 'editor' && (
+          <>
+            <button type="button" onClick={onAiComplete}>
+              <WandSparkles size={15} />
+              AI 补完
+            </button>
+            <button type="button" onClick={onSave} disabled={saving || !activeFile}>
+              <Check size={15} />
+              {saving ? '保存中' : '保存'}
+            </button>
+            <button type="button" onClick={onFormat}>
+              <Command size={15} />
+              格式化
+            </button>
+          </>
+        )}
+        {mode === 'wiki' && (
+          <button type="button" onClick={onRefreshWiki}>
+            <RefreshCw size={15} />
+            重建 Wiki
+          </button>
+        )}
       </div>
     </header>
   );
@@ -695,62 +991,35 @@ function EditorContent({
 
 function MarkdownLite({
   content,
-  activeCitationIndex,
-  onCitationHover,
-  onCitationSelect,
+  onCitationClick,
 }: {
   content: string;
-  activeCitationIndex?: number;
-  onCitationHover?: (index?: number) => void;
-  onCitationSelect?: (index: number) => void;
+  onCitationClick?: (index: number) => void;
 }) {
-  const { bodyLines, sources } = useMemo(() => parseMarkdownWithSources(content), [content]);
-  const [activeSourceIndexes, setActiveSourceIndexes] = useState<Set<number>>(new Set());
-  const sourceIndexes = useMemo(() => new Set(sources.map((source) => source.index)), [sources]);
-
-  useEffect(() => {
-    setActiveSourceIndexes(new Set());
-  }, [content]);
-
-  const toggleSource = (index: number) => {
-    setActiveSourceIndexes((prev) => {
-      const next = new Set(prev);
-      if (next.has(index)) {
-        next.delete(index);
-      } else {
-        next.add(index);
-      }
-      return next;
-    });
-  };
-
   const renderInlineText = (line: string, lineIndex: number) => {
-    const parts = line.split(/(\[\d+\])/g);
-    return parts.map((part, partIndex) => {
-      const match = /^\[(\d+)\]$/.exec(part);
-      const sourceIndex = match ? Number(match[1]) : undefined;
-      if (sourceIndex && sourceIndexes.has(sourceIndex)) {
-        const isActive = activeCitationIndex === sourceIndex || activeSourceIndexes.has(sourceIndex);
+    return line.split(/(\[\d+\])/g).map((part, partIndex) => {
+      const citationMatch = /^\[(\d+)\]$/.exec(part);
+      if (citationMatch) {
+        const index = parseInt(citationMatch[1], 10);
         return (
-          <button
-            className={`citation ${isActive ? 'citation--active' : ''}`}
-            type="button"
+          <span
             key={`${lineIndex}-${partIndex}-${part}`}
-            onMouseEnter={() => onCitationHover?.(sourceIndex)}
-            onMouseLeave={() => onCitationHover?.(undefined)}
-            onClick={() => {
-              toggleSource(sourceIndex);
-              onCitationSelect?.(sourceIndex);
-            }}
+            className="citation-link"
+            onClick={() => onCitationClick?.(index)}
+            title={`查看引用 [${index}]`}
           >
             {part}
-          </button>
+          </span>
         );
       }
-
       return <span key={`${lineIndex}-${partIndex}-${part}`}>{part}</span>;
     });
   };
+
+  const bodyLines = useMemo(
+    () => trimTrailingBlankLines(stripLegacyReferenceSection(content).split('\n')),
+    [content],
+  );
 
   return (
     <div className="markdown-lite">
@@ -785,19 +1054,15 @@ function MessageList({
   loading,
   booting,
   activeMessageId,
-  activeCitationIndex,
   onAskExample,
   onActivateMessage,
-  onCitationHover,
 }: {
   messages: ChatMessage[];
   loading: boolean;
   booting: boolean;
   activeMessageId?: string;
-  activeCitationIndex?: number;
   onAskExample: (question: string) => void;
   onActivateMessage: (message: ChatMessage) => void;
-  onCitationHover: (index?: number) => void;
 }) {
   const listRef = useRef<HTMLDivElement>(null);
 
@@ -851,16 +1116,7 @@ function MessageList({
           <div className="message__meta">{message.role === 'user' ? '你' : 'DeepMemo'} · {message.createdAt}</div>
           <div className="message__bubble">
             <MarkdownLite
-              content={message.content}
-              activeCitationIndex={activeMessageId === message.id ? activeCitationIndex : undefined}
-              onCitationHover={(index) => {
-                onActivateMessage(message);
-                onCitationHover(index);
-              }}
-              onCitationSelect={(index) => {
-                onActivateMessage(message);
-                onCitationHover(index);
-              }}
+              content={message.role === 'assistant' ? stripLegacyReferenceSection(message.content) : message.content}
             />
           </div>
         </article>
@@ -1056,28 +1312,21 @@ function HybridWorkspace({
   editorValue,
   streaming,
   messages,
-  sessions,
   activeSessionId,
   activeSession,
   input,
   loading,
   booting,
-  creating,
-  deleting,
   tools,
   selectedToolId,
   toolsLoading,
   entityOptions,
   activeMessageId,
-  activeCitationIndex,
   onEditorChange,
   onInsertEntity,
   onSlashCommand,
   onSave,
   onAskExample,
-  onSelectSession,
-  onCreateSession,
-  onDeleteSession,
   onInputChange,
   onSubmit,
   onAutoDraft,
@@ -1085,35 +1334,27 @@ function HybridWorkspace({
   onSelectTool,
   onClearTool,
   onActivateMessage,
-  onCitationHover,
 }: {
   mode: WorkspaceMode;
   activeFile?: FileNode;
   editorValue: string;
   streaming: boolean;
   messages: ChatMessage[];
-  sessions: Session[];
   activeSessionId?: string;
   activeSession?: Session;
   input: string;
   loading: boolean;
   booting: boolean;
-  creating: boolean;
-  deleting: boolean;
   tools: ChatTool[];
   selectedToolId?: string;
   toolsLoading: boolean;
   entityOptions: string[];
   activeMessageId?: string;
-  activeCitationIndex?: number;
   onEditorChange: (value: string) => void;
   onInsertEntity: (entity: string) => void;
   onSlashCommand: (command: 'daily' | 'extract' | 'polish') => void;
   onSave: () => void;
   onAskExample: (question: string) => void;
-  onSelectSession: (id: string) => void;
-  onCreateSession: () => void;
-  onDeleteSession: (id: string) => void;
   onInputChange: (value: string) => void;
   onSubmit: () => void;
   onAutoDraft: () => void;
@@ -1121,7 +1362,6 @@ function HybridWorkspace({
   onSelectTool: (toolId: string) => void;
   onClearTool: () => void;
   onActivateMessage: (message: ChatMessage) => void;
-  onCitationHover: (index?: number) => void;
 }) {
   return (
     <section className={`hybrid-workspace hybrid-workspace--${mode}`}>
@@ -1139,24 +1379,13 @@ function HybridWorkspace({
           />
         ) : (
           <div className="qa-panel">
-            <ConversationHeader
-              sessions={sessions}
-              activeSessionId={activeSessionId}
-              creating={creating}
-              deleting={deleting}
-              onSelectSession={onSelectSession}
-              onCreateSession={onCreateSession}
-              onDeleteSession={onDeleteSession}
-            />
             <MessageList
               messages={messages}
               loading={loading}
               booting={booting}
               activeMessageId={activeMessageId}
-              activeCitationIndex={activeCitationIndex}
               onAskExample={onAskExample}
               onActivateMessage={onActivateMessage}
-              onCitationHover={onCitationHover}
             />
           </div>
         )}
@@ -1184,9 +1413,149 @@ function HybridWorkspace({
   );
 }
 
+function WikiWorkspace({
+  graph,
+  activeCommunity,
+  activeNode,
+  loading,
+  error,
+  onSelectCommunity,
+  onSelectNode,
+  onOpenSourceFile,
+  onRefresh,
+}: {
+  graph: WikiGraph;
+  activeCommunity?: WikiCommunity;
+  activeNode?: WikiGraphNode;
+  loading: boolean;
+  error?: string;
+  onSelectCommunity: (communityId: string) => void;
+  onSelectNode: (path: string) => void;
+  onOpenSourceFile: (path: string) => void;
+  onRefresh: () => void;
+}) {
+  const communityNodes = useMemo(() => getCommunityNodes(graph, activeCommunity?.id), [graph, activeCommunity?.id]);
+  const layouts = useMemo(() => layoutCommunityNodes(communityNodes, activeNode?.path), [communityNodes, activeNode?.path]);
+  const layoutMap = useMemo(() => new Map(layouts.map((layout) => [layout.path, layout])), [layouts]);
+  const selectedPath = activeNode?.path ?? activeCommunity?.hubPath;
+  const visibleEdges = useMemo(() => {
+    const paths = new Set(communityNodes.map((node) => node.path));
+    return graph.edges.filter((edge) => paths.has(edge.from) && paths.has(edge.to));
+  }, [communityNodes, graph.edges]);
+  const selectedNeighbors = useMemo(() => {
+    if (!activeNode) return [];
+    return activeNode.neighbors
+      .map((path) => graph.nodeMap.get(path))
+      .filter((node): node is WikiGraphNode => Boolean(node))
+      .sort((a, b) => b.degree - a.degree || a.title.localeCompare(b.title, 'zh-Hans-CN'));
+  }, [activeNode, graph.nodeMap]);
+
+  return (
+    <section className="hybrid-workspace hybrid-workspace--wiki">
+      <div className="workspace-body workspace-body--wiki">
+        <div className="wiki-graph-workspace">
+          {error && <div className="inline-warning">{error}</div>}
+
+          {!activeCommunity ? (
+            <div className="empty-panel empty-panel--wiki">
+              <Network size={18} />
+              <span>{loading ? '加载社区中...' : '在左侧选择一个知识社区'}</span>
+            </div>
+          ) : (
+            <div className="wiki-graph-card">
+              <div className="wiki-graph-card__meta">
+                <div>
+                  <div className="wiki-graph-card__eyebrow">
+                    <span className="wiki-item__badge wiki-item__badge--community">Community</span>
+                    <span className="wiki-status wiki-status--active">{activeCommunity.nodeCount} nodes</span>
+                  </div>
+                  <h1>{activeCommunity.title}</h1>
+                  <p>{activeCommunity.summary}</p>
+                </div>
+                <div className="wiki-graph-card__chips">
+                  {activeCommunity.topTags.map((tag) => (
+                    <span className="wiki-chip" key={tag}>{tag}</span>
+                  ))}
+                </div>
+              </div>
+
+              <div className="wiki-graph-canvas">
+                <svg className="wiki-graph-canvas__edges" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true">
+                  {visibleEdges.map((edge) => {
+                    const from = layoutMap.get(edge.from);
+                    const to = layoutMap.get(edge.to);
+                    if (!from || !to) return null;
+                    return (
+                      <line
+                        key={`${edge.from}-${edge.to}`}
+                        x1={from.x}
+                        y1={from.y}
+                        x2={to.x}
+                        y2={to.y}
+                      />
+                    );
+                  })}
+                </svg>
+
+                {layouts.map((layout) => {
+                  const node = graph.nodeMap.get(layout.path);
+                  if (!node) return null;
+                  const isSelected = layout.path === selectedPath;
+                  const isHub = layout.path === activeCommunity.hubPath;
+                  const isNeighbor = activeNode?.neighbors.includes(layout.path) ?? false;
+                  return (
+                    <button
+                      key={layout.path}
+                      type="button"
+                      className={[
+                        'wiki-graph-node',
+                        `wiki-graph-node--${node.type}`,
+                        isSelected ? 'wiki-graph-node--selected' : '',
+                        isHub ? 'wiki-graph-node--hub' : '',
+                        isNeighbor ? 'wiki-graph-node--neighbor' : '',
+                      ].join(' ')}
+                      style={{
+                        left: `${layout.x}%`,
+                        top: `${layout.y}%`,
+                        width: `${layout.size + 18}px`,
+                        height: `${layout.size + 18}px`,
+                      }}
+                      title={node.title}
+                      onClick={() => onSelectNode(node.path)}
+                    >
+                      <span>{node.title}</span>
+                    </button>
+                  );
+                })}
+              </div>
+
+              <div className="wiki-graph-footer">
+                <div>
+                  <strong>Hub</strong>
+                  <span>{graph.nodeMap.get(activeCommunity.hubPath)?.title ?? 'Unknown'}</span>
+                </div>
+                <div>
+                  <strong>Edges</strong>
+                  <span>{activeCommunity.edgeCount}</span>
+                </div>
+                <div>
+                  <strong>Updated</strong>
+                  <span>{activeCommunity.updatedAt || '未更新'}</span>
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
+    </section>
+  );
+}
+
 function SourcePanel({
   mode,
   activeMessage,
+  activeCommunity,
+  activeNode,
   sources,
   sourcesLoading,
   sourcesError,
@@ -1194,13 +1563,17 @@ function SourcePanel({
   onCitationHover,
   onOpenSourceFile,
   activeFile,
+  onSelectWikiNode,
   fileRefs,
   fileRefsLoading,
   fileRefsError,
   onNavigateToFileReference,
+  wikiGraph,
 }: {
   mode: WorkspaceMode;
   activeMessage?: ChatMessage;
+  activeCommunity?: WikiCommunity;
+  activeNode?: WikiGraphNode;
   sources: SourcePanelItem[];
   sourcesLoading: boolean;
   sourcesError?: string;
@@ -1208,18 +1581,34 @@ function SourcePanel({
   onCitationHover: (index?: number) => void;
   onOpenSourceFile: (path: string) => void;
   activeFile?: FileNode;
+  onSelectWikiNode: (path: string) => void;
   fileRefs: FileReference[];
   fileRefsLoading: boolean;
   fileRefsError?: string;
   onNavigateToFileReference: (ref: FileReference) => void;
+  wikiGraph: WikiGraph;
 }) {
   const isEditorMode = mode === 'editor';
+  const backlinks = useMemo(() => {
+    if (mode !== 'wiki' || !activeNode) return [];
+    return (wikiGraph.backlinks.get(activeNode.path) ?? [])
+      .map((path) => wikiGraph.nodeMap.get(path))
+      .filter((node): node is WikiGraphNode => Boolean(node));
+  }, [activeNode, mode, wikiGraph.backlinks, wikiGraph.nodeMap]);
   return (
     <aside className="source-panel">
       <div className="source-panel__header">
         <div>
-          <strong>Source</strong>
-          <span>{isEditorMode ? (activeFile?.name ?? '未选择文件') : (activeMessage?.createdAt ?? '未选择消息')}</span>
+          <strong>{mode === 'wiki' ? 'Node Detail' : 'Source'}</strong>
+          <span>
+            {mode === 'editor'
+              ? (activeFile?.name ?? '未选择文件')
+              : mode === 'qa'
+                ? (activeMessage?.createdAt ?? '未选择消息')
+                : activeNode
+                  ? (activeCommunity ? `${activeCommunity.title} · ${activeNode.title}` : activeNode.title)
+                  : '未选择节点'}
+          </span>
         </div>
       </div>
 
@@ -1232,7 +1621,7 @@ function SourcePanel({
             error={fileRefsError}
             onNavigate={onNavigateToFileReference}
           />
-        ) : (
+        ) : mode === 'qa' ? (
           <SourcesView
             message={activeMessage}
             sources={sources}
@@ -1242,6 +1631,90 @@ function SourcePanel({
             onCitationHover={onCitationHover}
             onOpenSourceFile={onOpenSourceFile}
           />
+        ) : (
+          <div className="source-list">
+            {activeNode ? (
+              <>
+                <div className="message-group">
+                  <span>Wiki Node</span>
+                  <strong>{activeNode.title}</strong>
+                </div>
+                <article className="source-card">
+                  <div className="source-card__summary">
+                    <div className="source-card__top">
+                      <span className={`wiki-item__badge wiki-item__badge--${activeNode.type}`}>{formatWikiType(activeNode.type)}</span>
+                      <span className={`wiki-status wiki-status--${activeNode.status}`}>{activeNode.status}</span>
+                    </div>
+                    <span className="source-card__path">{activeNode.path}</span>
+                    <span className="source-card__file">
+                      {activeNode.sources.length} sources · {activeNode.neighbors.length} neighbors
+                    </span>
+                  </div>
+                </article>
+
+                {activeNode.summary && (
+                  <div className="wiki-side-section">
+                    <strong>Summary</strong>
+                    <p className="wiki-side-summary">{activeNode.summary}</p>
+                  </div>
+                )}
+
+                {activeNode.sources.length > 0 && (
+                  <div className="wiki-side-section">
+                    <strong>Sources</strong>
+                    <div className="wiki-side-list">
+                      {activeNode.sources.map((source) => (
+                        <button key={source} type="button" className="wiki-side-link" onClick={() => onOpenSourceFile(source)}>
+                          {source}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {activeNode.related.length > 0 && (
+                  <div className="wiki-side-section">
+                    <strong>Related Pages</strong>
+                    <div className="wiki-side-list">
+                      {activeNode.related.map((path) => {
+                        const page = wikiGraph.nodeMap.get(path);
+                        return (
+                          <button key={path} type="button" className="wiki-side-link" onClick={() => onSelectWikiNode(path)}>
+                            {page?.title ?? path}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
+
+                {backlinks.length > 0 && (
+                  <div className="wiki-side-section">
+                    <strong>Backlinks</strong>
+                    <div className="wiki-side-list">
+                      {backlinks.map((node) => (
+                        <button key={node.path} type="button" className="wiki-side-link" onClick={() => onSelectWikiNode(node.path)}>
+                          {node.title}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {activeNode.body && (
+                  <div className="wiki-side-section">
+                    <strong>Preview</strong>
+                    <MarkdownLite content={activeNode.body} />
+                  </div>
+                )}
+              </>
+            ) : (
+              <div className="empty-panel">
+                <Network size={18} />
+                <span>点击图谱节点查看详情</span>
+              </div>
+            )}
+          </div>
         )}
       </div>
     </aside>
@@ -1401,29 +1874,45 @@ function SourcesView({
   onCitationHover: (index?: number) => void;
   onOpenSourceFile: (path: string) => void;
 }) {
-  const [expandedSourceKeys, setExpandedSourceKeys] = useState<Set<string>>(new Set());
+  const [expandedFiles, setExpandedFiles] = useState<Set<string>>(new Set());
 
   useEffect(() => {
-    setExpandedSourceKeys(new Set());
+    setExpandedFiles(new Set());
   }, [message?.id]);
 
-  const toggleSource = (key: string) => {
-    setExpandedSourceKeys((current) => {
+  const toggleFile = (path: string) => {
+    setExpandedFiles((current) => {
       const next = new Set(current);
-      if (next.has(key)) {
-        next.delete(key);
+      if (next.has(path)) {
+        next.delete(path);
       } else {
-        next.add(key);
+        next.add(path);
       }
       return next;
     });
   };
 
+  // Group sources by file path
+  const fileGroups = useMemo(() => {
+    const groups = new Map<string, SourcePanelItem[]>();
+    for (const source of sources) {
+      const existing = groups.get(source.path) ?? [];
+      existing.push(source);
+      groups.set(source.path, existing);
+    }
+    return Array.from(groups.entries()).map(([path, items]) => ({
+      path,
+      items,
+      count: items.length,
+      maxScore: Math.max(...items.map((item) => item.score ?? 0)),
+    }));
+  }, [sources]);
+
   if (!message) {
     return (
       <div className="empty-panel">
         <MessageSquare size={18} />
-        <span>点击一条问答消息查看独立引用分组</span>
+        <span>点击一条问答消息查看引用来源</span>
       </div>
     );
   }
@@ -1453,49 +1942,77 @@ function SourcesView({
   return (
     <div className="source-list">
       <div className="message-group">
-        <span>Message Group</span>
-        <strong>{message.role === 'assistant' ? 'DeepMemo' : '你'} · {message.createdAt}</strong>
+        <div className="message-group__header">
+          <Link2 size={14} />
+          <span>引用来源</span>
+        </div>
+        <div className="message-group__info">
+          <span className="message-group__role">
+            {message.role === 'assistant' ? <Bot size={13} /> : <span>你</span>}
+            {message.role === 'assistant' ? 'DeepMemo' : '你'}
+          </span>
+          <span className="message-group__time">{message.createdAt}</span>
+        </div>
+        <p className="message-group__preview">
+          {message.content.length > 80 ? message.content.slice(0, 80) + '...' : message.content}
+        </p>
       </div>
-      {error && <div className="inline-warning">{error}，已使用消息正文中的引用片段。</div>}
-      {sources.map((source) => {
-        const sourceKey = `${source.messageId}-${source.index}-${source.path}`;
-        const isExpanded = expandedSourceKeys.has(sourceKey);
+      {error && <div className="inline-warning">{error}，已使用结构化引用信息。</div>}
+      {fileGroups.map((group) => {
+        const isExpanded = expandedFiles.has(group.path);
         return (
-          <article
-            className={`source-card ${activeCitationIndex === source.index ? 'source-card--active' : ''}`}
-            key={sourceKey}
-            onMouseEnter={() => onCitationHover(source.index)}
-            onMouseLeave={() => onCitationHover(undefined)}
-          >
+          <article className="source-file-card" key={group.path}>
             <button
-              className="source-card__summary"
+              className="source-file-card__header"
               type="button"
-              aria-expanded={isExpanded}
-              onClick={() => toggleSource(sourceKey)}
+              onClick={() => toggleFile(group.path)}
             >
-              <div className="source-card__top">
-                <span className="source-index">[{source.index}]</span>
-                <span className="source-card__meta">
-                  {source.score !== undefined && (
-                    <span className={`score score--${scoreLevel(source.score)}`}>
-                      {Math.round(source.score * 100)}%
-                    </span>
-                  )}
-                  {isExpanded ? <ChevronDown size={15} /> : <ChevronRight size={15} />}
-                </span>
+              <div className="source-file-card__info">
+                <FileText size={16} className="source-file-card__icon" />
+                <div className="source-file-card__meta">
+                  <span className="source-file-card__path">{group.path}</span>
+                  <span className="source-file-card__stats">
+                    {group.count} 个引用片段
+                    {group.maxScore > 0 && (
+                      <> · <span className={`score score--${scoreLevel(group.maxScore)}`}>
+                        {Math.round(group.maxScore * 100)}%
+                      </span></>
+                    )}
+                  </span>
+                </div>
               </div>
-              <span className="source-card__path">{source.path}</span>
-              <span className="source-card__file">
-                {source.startLine > 0 ? `Lines ${source.startLine}-${source.endLine}` : source.evidenceId ?? 'fingerprint citation'}
-              </span>
-            </button>
-            <button className="source-card__open" type="button" onClick={() => onOpenSourceFile(source.path)}>
-              <Link2 size={14} />
-              跳转到源文件
+              <div className="source-file-card__actions">
+                <button
+                  className="source-file-card__open"
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onOpenSourceFile(group.path);
+                  }}
+                >
+                  <Link2 size={14} />
+                </button>
+                {isExpanded ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
+              </div>
             </button>
             {isExpanded && (
-              <div className="source-card__detail">
-                <p>{source.excerpt}</p>
+              <div className="source-file-card__fragments">
+                {group.items.map((item) => (
+                  <div
+                    key={item.index}
+                    className={`source-fragment ${activeCitationIndex === item.index ? 'source-fragment--active' : ''}`}
+                    onMouseEnter={() => onCitationHover(item.index)}
+                    onMouseLeave={() => onCitationHover(undefined)}
+                  >
+                    <div className="source-fragment__header">
+                      <span className="source-fragment__index">[{item.index}]</span>
+                      <span className="source-fragment__lines">
+                        {item.startLine > 0 ? `Lines ${item.startLine}-${item.endLine}` : item.evidenceId ?? ''}
+                      </span>
+                    </div>
+                    <p className="source-fragment__excerpt">{item.excerpt}</p>
+                  </div>
+                ))}
               </div>
             )}
           </article>
@@ -1534,6 +2051,40 @@ export function App() {
   const [fileRefs, setFileRefs] = useState<FileReference[]>([]);
   const [fileRefsLoading, setFileRefsLoading] = useState(false);
   const [fileRefsError, setFileRefsError] = useState<string>();
+  const [wikiGraph, setWikiGraph] = useState<WikiGraph>({
+    meta: {
+      buildDate: '',
+      sourceDir: 'diary',
+      totalNodes: 0,
+      totalEdges: 0,
+      totalCommunities: 0,
+      degraded: false,
+      insightsDegraded: false,
+    },
+    communities: [],
+    nodes: [],
+    nodeMap: new Map(),
+    edges: [],
+    backlinks: new Map(),
+    insights: {
+      surprisingConnections: [],
+      isolatedNodes: [],
+      bridgeNodes: [],
+      sparseCommunities: [],
+      meta: {
+        degraded: false,
+        nodeCount: 0,
+        edgeCount: 0,
+        maxInsightNodes: 0,
+        maxInsightEdges: 0,
+      },
+    },
+  });
+  const [wikiGraphLoading, setWikiGraphLoading] = useState(false);
+  const [wikiGraphError, setWikiGraphError] = useState<string>();
+  const [activeWikiCommunityId, setActiveWikiCommunityId] = useState<string>();
+  const [activeWikiNodePath, setActiveWikiNodePath] = useState<string>();
+  const [wikiQuery, setWikiQuery] = useState('');
   const pendingNavigationMessageId = useRef<string>();
 
   const activeFile = useMemo(
@@ -1550,15 +2101,19 @@ export function App() {
   );
   const editorValue = activeFileId ? fileContents[activeFileId] ?? '' : '';
   const entityOptions = useMemo(() => deriveEntityOptions(files, editorValue), [files, editorValue]);
-  const activeParsedSources = useMemo(() => getMessageSources(activeMessage), [activeMessage]);
   const activeSources = useMemo(() => {
     if (!activeMessage) return [];
     const citations = remoteCitations[activeMessage.id];
-    if (citations && citations.length > 0) {
-      return mapCitationsToSources(activeMessage.id, citations);
-    }
-    return mapParsedSources(activeMessage.id, activeParsedSources);
-  }, [activeMessage, activeParsedSources, remoteCitations]);
+    return citations && citations.length > 0 ? mapCitationsToSources(activeMessage.id, citations) : [];
+  }, [activeMessage, remoteCitations]);
+  const activeWikiCommunity = useMemo(
+    () => getSelectedCommunity(wikiGraph, activeWikiCommunityId, activeWikiNodePath),
+    [activeWikiCommunityId, activeWikiNodePath, wikiGraph],
+  );
+  const activeWikiNode = useMemo(() => {
+    const fallbackPath = activeWikiNodePath ?? activeWikiCommunity?.hubPath;
+    return fallbackPath ? wikiGraph.nodeMap.get(fallbackPath) : undefined;
+  }, [activeWikiCommunity?.hubPath, activeWikiNodePath, wikiGraph.nodeMap]);
 
   const setActiveEditorValue = (value: string) => {
     if (!activeFileId) return;
@@ -1573,8 +2128,9 @@ export function App() {
 
   const refreshSessionList = async (preferredSessionId?: string) => {
     const remoteSessions = await listSessions();
-    setSessions(remoteSessions);
-    const nextActiveId = preferredSessionId ?? activeSessionId ?? remoteSessions[0]?.sessionId;
+    const sortedSessions = sortSessionsByUpdatedAt(remoteSessions);
+    setSessions(sortedSessions);
+    const nextActiveId = preferredSessionId ?? activeSessionId ?? sortedSessions[0]?.sessionId;
     setActiveSessionId(nextActiveId);
     return nextActiveId;
   };
@@ -1582,9 +2138,10 @@ export function App() {
   const ensureSession = async () => {
     const remoteSessions = await listSessions();
     if (remoteSessions.length > 0) {
-      setSessions(remoteSessions);
-      setActiveSessionId(remoteSessions[0].sessionId);
-      return remoteSessions[0].sessionId;
+      const sortedSessions = sortSessionsByUpdatedAt(remoteSessions);
+      setSessions(sortedSessions);
+      setActiveSessionId(sortedSessions[0].sessionId);
+      return sortedSessions[0].sessionId;
     }
 
     const created = await createSession(createSessionName());
@@ -1607,13 +2164,30 @@ export function App() {
 
   const refreshFileTree = async (preferredFileId?: string) => {
     const remoteFiles = await getFileTree();
-    setFiles(remoteFiles);
-    setExpanded((current) => new Set([...current, ...remoteFiles.map((node) => node.id)]));
+    // 过滤掉wiki文件夹，Wiki由LLM自动维护，不应手动编辑
+    const filteredFiles = remoteFiles.filter((node) => node.name !== 'wiki');
+    setFiles(filteredFiles);
+    setExpanded((current) => new Set([...current, ...filteredFiles.map((node) => node.id)]));
 
-    const preferred = preferredFileId ? findNode(remoteFiles, preferredFileId) : undefined;
-    const nextFile = preferred?.type === 'file' ? preferred : findFirstFile(remoteFiles);
+    const preferred = preferredFileId ? findNode(filteredFiles, preferredFileId) : undefined;
+    const nextFile = preferred?.type === 'file' ? preferred : findFirstFile(filteredFiles);
     setActiveFileId(nextFile?.id);
     return nextFile;
+  };
+
+  const loadWikiGraph = async () => {
+    setWikiGraphLoading(true);
+    setWikiGraphError(undefined);
+    try {
+      const graph = await getWikiGraph();
+      setWikiGraph(graph);
+      return graph;
+    } catch (caught) {
+      setWikiGraphError(caught instanceof Error ? caught.message : 'Wiki 图谱加载失败');
+      return undefined;
+    } finally {
+      setWikiGraphLoading(false);
+    }
   };
 
   useEffect(() => {
@@ -1770,10 +2344,48 @@ export function App() {
     };
   }, [mode, activeFile?.path, activeFile?.type]);
 
-  const handleSelectSession = (sessionId: string) => {
+  useEffect(() => {
+    if (mode !== 'wiki') return;
+    if (wikiGraph.nodes.length === 0 && !wikiGraphLoading) {
+      loadWikiGraph().catch((caught) => {
+        setWikiGraphError(caught instanceof Error ? caught.message : 'Wiki 图谱加载失败');
+      });
+    }
+  }, [mode, wikiGraph.nodes.length, wikiGraphLoading]);
+
+  useEffect(() => {
+    if (mode !== 'wiki') return;
+    if (wikiGraph.communities.length === 0) {
+      setActiveWikiCommunityId(undefined);
+      setActiveWikiNodePath(undefined);
+      return;
+    }
+    const selectedCommunity = getSelectedCommunity(wikiGraph, activeWikiCommunityId, activeWikiNodePath);
+    if (!selectedCommunity) return;
+    if (selectedCommunity.id !== activeWikiCommunityId) {
+      setActiveWikiCommunityId(selectedCommunity.id);
+    }
+    const nextPath = activeWikiNodePath && wikiGraph.nodeMap.has(activeWikiNodePath)
+      ? activeWikiNodePath
+      : selectedCommunity.hubPath;
+    if (nextPath && nextPath !== activeWikiNodePath) {
+      setActiveWikiNodePath(nextPath);
+    }
+  }, [mode, activeWikiCommunityId, activeWikiNodePath, wikiGraph]);
+
+  const handleSelectSession = async (sessionId: string) => {
     pendingNavigationMessageId.current = undefined;
     setActiveCitationIndex(undefined);
     setActiveSessionId(sessionId);
+    setMode('qa');
+    try {
+      const remoteMessages = await loadMessagesForSession(sessionId);
+      const latestAssistant = [...remoteMessages].reverse().find((message) => message.role === 'assistant');
+      const fallbackMessage = latestAssistant ?? remoteMessages[remoteMessages.length - 1];
+      setActiveMessageId(fallbackMessage?.id);
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : '消息加载失败');
+    }
   };
 
   const handleNavigateToFileReference = async (ref: FileReference) => {
@@ -1799,13 +2411,60 @@ export function App() {
       setError(caught instanceof Error ? caught.message : '会话跳转失败');
     }
   };
+
+  const handleSelectWikiCommunity = async (communityId: string) => {
+    const community = wikiGraph.communities.find((item) => item.id === communityId);
+    if (!community) return;
+    setActiveWikiCommunityId(community.id);
+    setActiveWikiNodePath(community.hubPath);
+    setMode('wiki');
+  };
+
+  const handleSelectWikiNode = async (path: string) => {
+    const normalized = normalizeWikiPath(path);
+    const community = getCommunityForNode(wikiGraph, normalized);
+    if (!community) return;
+    setActiveWikiCommunityId(community.id);
+    setActiveWikiNodePath(normalized);
+    setMode('wiki');
+  };
+
+  const handleRefreshWiki = async () => {
+    setRefreshing(true);
+    setWikiGraphError(undefined);
+    try {
+      await rebuildWiki(false);
+      const refreshedGraph = await loadWikiGraph();
+      if (refreshedGraph && refreshedGraph.communities.length > 0) {
+        const selectedCommunity = getSelectedCommunity(
+          refreshedGraph,
+          activeWikiCommunityId,
+          activeWikiNodePath,
+        );
+        const nextCommunity = selectedCommunity ?? refreshedGraph.communities[0];
+        if (nextCommunity) {
+          setActiveWikiCommunityId(nextCommunity.id);
+          setActiveWikiNodePath(nextCommunity.hubPath);
+        }
+      } else {
+        setActiveWikiCommunityId(undefined);
+        setActiveWikiNodePath(undefined);
+      }
+    } catch (caught) {
+      setWikiGraphError(caught instanceof Error ? caught.message : 'Wiki 重建失败');
+    } finally {
+      setRefreshing(false);
+    }
+  };
+
   const handleCreateSession = async () => {
     setCreating(true);
     setError(undefined);
     try {
       const created = await createSession(createSessionName());
-      setSessions((current) => [created, ...current]);
+      setSessions((current) => sortSessionsByUpdatedAt([created, ...current]));
       setActiveSessionId(created.sessionId);
+      setActiveMessageId(undefined);
       setMessages([]);
       setMode('qa');
     } catch (caught) {
@@ -1822,6 +2481,9 @@ export function App() {
       await getHealth();
       const selectedId = await refreshSessionList(activeSessionId);
       const nextFile = await refreshFileTree(activeFileId);
+      if (mode === 'wiki') {
+        await handleRefreshWiki();
+      }
       if (selectedId) {
         await loadMessagesForSession(selectedId);
       }
@@ -1842,16 +2504,20 @@ export function App() {
       await deleteSession(sessionId);
       const remaining = sessions.filter((session) => session.sessionId !== sessionId);
       if (remaining.length > 0) {
-        setSessions(remaining);
+        const sortedRemaining = sortSessionsByUpdatedAt(remaining);
+        setSessions(sortedRemaining);
         if (activeSessionId === sessionId) {
-          setActiveSessionId(remaining[0].sessionId);
-          await loadMessagesForSession(remaining[0].sessionId);
+          setActiveSessionId(sortedRemaining[0].sessionId);
+          setActiveMessageId(undefined);
+          await loadMessagesForSession(sortedRemaining[0].sessionId);
         }
       } else {
         const created = await createSession(createSessionName());
         setSessions([created]);
         setActiveSessionId(created.sessionId);
+        setActiveMessageId(undefined);
         setMessages([]);
+        setMode('qa');
       }
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : '删除会话失败');
@@ -2133,79 +2799,110 @@ export function App() {
     }
   };
 
+  const currentError = error ?? (mode === 'wiki' ? wikiGraphError : undefined);
+
   return (
     <div className="app-shell">
-      <DataExplorer
+      <ModeSidebar
+        mode={mode}
         files={files}
+        sessions={sessions}
+        wikiGraph={wikiGraph}
         activeFileId={activeFileId}
+        activeSessionId={activeSessionId}
+        activeWikiCommunityId={activeWikiCommunityId}
         expanded={expanded}
+        wikiQuery={wikiQuery}
         refreshing={refreshing}
+        creating={creating}
         onSelectFile={handleSelectFile}
         onToggleFolder={handleToggleFolder}
         onRenameNode={handleRenameNode}
         onCreateFile={handleCreateFile}
         onCreateFolder={handleCreateFolder}
         onRefresh={handleRefresh}
+        onSelectSession={handleSelectSession}
+        onCreateSession={handleCreateSession}
+        onDeleteSession={handleDeleteSession}
+        activeWikiNodeId={activeWikiNodePath}
+        onSelectWikiNode={handleSelectWikiNode}
+        onSelectWikiCommunity={handleSelectWikiCommunity}
+        onChangeWikiQuery={setWikiQuery}
+        onRefreshWiki={handleRefreshWiki}
       />
 
       <main className="workspace">
         <WorkspaceHeader
           activeFile={activeFile}
+          activeSession={activeSession}
+          activeWikiCommunity={activeWikiCommunity}
+          activeWikiNode={activeWikiNode}
           mode={mode}
           saving={saving}
           onModeChange={setMode}
           onAiComplete={handleAiComplete}
           onSave={handleSave}
           onFormat={handleFormat}
+          onCreateSession={handleCreateSession}
+          onRefresh={handleRefresh}
+          onRefreshWiki={handleRefreshWiki}
         />
-        {error && (
+        {currentError && (
           <div className="error-banner">
             <AlertCircle size={16} />
-            {error}
+            {currentError}
           </div>
         )}
-        <HybridWorkspace
-          mode={mode}
-          activeFile={activeFile}
-          editorValue={editorValue}
-          streaming={drafting}
-          messages={messages}
-          sessions={sessions}
-          activeSessionId={activeSessionId}
-          activeSession={activeSession}
-          input={input}
-          loading={loading}
-          booting={booting}
-          creating={creating}
-          deleting={deleting}
-          tools={chatTools}
-          selectedToolId={selectedToolId}
-          toolsLoading={toolsLoading}
-          entityOptions={entityOptions}
-          activeMessageId={activeMessageId}
-          activeCitationIndex={activeCitationIndex}
-          onEditorChange={setActiveEditorValue}
-          onInsertEntity={handleInsertEntity}
-          onSlashCommand={handleSlashCommand}
-          onSave={handleSave}
-          onAskExample={submitQuestion}
-          onSelectSession={handleSelectSession}
-          onCreateSession={handleCreateSession}
-          onDeleteSession={handleDeleteSession}
-          onInputChange={setInput}
-          onSubmit={() => submitQuestion()}
-          onAutoDraft={handleAutoDraft}
-          onRefactor={handleRefactor}
-          onSelectTool={setSelectedToolId}
-          onClearTool={() => setSelectedToolId(undefined)}
-          onActivateMessage={handleActivateMessage}
-          onCitationHover={setActiveCitationIndex}
-        />
+        {mode === 'wiki' ? (
+          <WikiWorkspace
+            graph={wikiGraph}
+            activeCommunity={activeWikiCommunity}
+            activeNode={activeWikiNode}
+            loading={wikiGraphLoading}
+            error={wikiGraphError}
+            onSelectCommunity={handleSelectWikiCommunity}
+            onSelectNode={handleSelectWikiNode}
+            onOpenSourceFile={handleOpenSourceFile}
+            onRefresh={handleRefreshWiki}
+          />
+        ) : (
+          <HybridWorkspace
+            mode={mode}
+            activeFile={activeFile}
+            editorValue={editorValue}
+            streaming={drafting}
+            messages={messages}
+            activeSessionId={activeSessionId}
+            activeSession={activeSession}
+            input={input}
+            loading={loading}
+            booting={booting}
+            tools={chatTools}
+            selectedToolId={selectedToolId}
+            toolsLoading={toolsLoading}
+            entityOptions={entityOptions}
+            activeMessageId={activeMessageId}
+            onEditorChange={setActiveEditorValue}
+            onInsertEntity={handleInsertEntity}
+            onSlashCommand={handleSlashCommand}
+            onSave={handleSave}
+            onAskExample={submitQuestion}
+            onInputChange={setInput}
+            onSubmit={() => submitQuestion()}
+            onAutoDraft={handleAutoDraft}
+            onRefactor={handleRefactor}
+            onSelectTool={setSelectedToolId}
+            onClearTool={() => setSelectedToolId(undefined)}
+            onActivateMessage={handleActivateMessage}
+          />
+        )}
       </main>
 
       <SourcePanel
         mode={mode}
         activeMessage={activeMessage}
+        activeCommunity={activeWikiCommunity}
+        activeNode={activeWikiNode}
         sources={activeSources}
         sourcesLoading={citationLoading}
         sourcesError={citationError}
@@ -2213,10 +2910,12 @@ export function App() {
         onCitationHover={setActiveCitationIndex}
         onOpenSourceFile={handleOpenSourceFile}
         activeFile={activeFile}
+        onSelectWikiNode={handleSelectWikiNode}
         fileRefs={fileRefs}
         fileRefsLoading={fileRefsLoading}
         fileRefsError={fileRefsError}
         onNavigateToFileReference={handleNavigateToFileReference}
+        wikiGraph={wikiGraph}
       />
     </div>
   );

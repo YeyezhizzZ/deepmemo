@@ -9,6 +9,10 @@ import type {
   ApiMessageResponse,
   ApiSessionResponse,
   ApiSyncStatusResponse,
+  ApiWikiPageDetail,
+  ApiWikiGraphResponse,
+  ApiWikiPageSummary,
+  ApiWikiRebuildResponse,
   AutoDraftResponse,
   FileReference,
   ChatTool,
@@ -18,6 +22,14 @@ import type {
   FsNode,
   Session,
   SyncStatus,
+  WikiPageDetail,
+  WikiPageSummary,
+  WikiGraph,
+  WikiGraphNode,
+  WikiGraphEdge,
+  WikiCommunity,
+  WikiGraphInsights,
+  WikiGraphMeta,
 } from './types';
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? '/api';
@@ -70,6 +82,8 @@ export function mapSession(session: ApiSessionResponse): Session {
     sessionSummary: session.session_summary,
     createdAt: formatTime(session.created_at),
     updatedAt: formatTime(session.updated_at),
+    createdAtIso: session.created_at,
+    updatedAtIso: session.updated_at,
   };
 }
 
@@ -110,6 +124,142 @@ function mapChatTool(tool: ApiChatToolResponse): ChatTool {
     name: tool.name,
     description: tool.description,
     executionType: tool.execution_type,
+  };
+}
+
+function mapWikiPageSummary(page: ApiWikiPageSummary): WikiPageSummary {
+  return {
+    path: page.path,
+    title: page.title,
+    type: page.type,
+    status: page.status,
+    tags: page.tags,
+    sources: page.sources,
+    related: page.related,
+    lastUpdated: page.last_updated,
+    summary: page.summary,
+  };
+}
+
+function mapWikiPageDetail(page: ApiWikiPageDetail): WikiPageDetail {
+  return {
+    ...mapWikiPageSummary(page),
+    body: page.body,
+    content: page.content,
+  };
+}
+
+function mapWikiGraphNode(node: ApiWikiGraphResponse['nodes'][number]): WikiGraphNode {
+  return {
+    path: node.path,
+    title: node.title,
+    type: node.type,
+    status: node.status,
+    tags: node.tags,
+    sources: node.sources,
+    related: node.related,
+    lastUpdated: node.last_updated,
+    summary: node.summary,
+    body: node.body,
+    communityId: node.community_id,
+    incoming: node.incoming,
+    outgoing: node.outgoing,
+    degree: node.degree,
+    neighbors: node.neighbors,
+    sourcePaths: node.source_paths,
+    subtype: node.subtype,
+  };
+}
+
+function mapWikiGraphEdge(edge: ApiWikiGraphResponse['edges'][number]): WikiGraphEdge {
+  return {
+    from: edge.from,
+    to: edge.to,
+    weight: edge.weight,
+    directLink: edge.direct_link,
+    sourceOverlap: edge.source_overlap,
+    adamicAdar: edge.adamic_adar,
+    typeAffinity: edge.type_affinity,
+  };
+}
+
+function mapWikiCommunity(community: ApiWikiGraphResponse['communities'][number]): WikiCommunity {
+  return {
+    id: community.id,
+    title: community.title,
+    summary: community.summary,
+    nodePaths: community.node_paths,
+    hubPath: community.hub_path,
+    updatedAt: community.updated_at,
+    topTags: community.top_tags,
+    nodeCount: community.node_count,
+    edgeCount: community.edge_count,
+  };
+}
+
+function mapWikiGraph(response: ApiWikiGraphResponse): WikiGraph {
+  const nodes = response.nodes.map(mapWikiGraphNode);
+  const nodeMap = new Map(nodes.map((node) => [node.path, node]));
+  const edges = response.edges.map(mapWikiGraphEdge);
+  const backlinks = new Map<string, string[]>();
+  for (const edge of edges) {
+    if (!backlinks.has(edge.to)) backlinks.set(edge.to, []);
+    backlinks.get(edge.to)!.push(edge.from);
+    if (!backlinks.has(edge.from)) backlinks.set(edge.from, []);
+    backlinks.get(edge.from)!.push(edge.to);
+  }
+  return {
+    meta: {
+      buildDate: response.meta.build_date,
+      sourceDir: response.meta.source_dir,
+      totalNodes: response.meta.total_nodes,
+      totalEdges: response.meta.total_edges,
+      totalCommunities: response.meta.total_communities,
+      degraded: response.meta.degraded,
+      insightsDegraded: response.meta.insights_degraded,
+    },
+    communities: response.communities.map(mapWikiCommunity),
+    nodes,
+    nodeMap,
+    edges,
+    backlinks,
+    insights: {
+      surprisingConnections: response.insights.surprising_connections.map((item) => ({
+        from: item.from,
+        to: item.to,
+        weight: item.weight,
+        fromCommunity: item.from_community,
+        toCommunity: item.to_community,
+      })),
+      isolatedNodes: response.insights.isolated_nodes.map((item) => ({
+        id: item.id,
+        label: item.label,
+        degree: item.degree,
+        community: item.community,
+      })),
+      bridgeNodes: response.insights.bridge_nodes.map((item) => ({
+        id: item.id,
+        label: item.label,
+        community: item.community,
+        connectedCommunities: item.connected_communities,
+        communityCount: item.community_count,
+      })),
+      sparseCommunities: response.insights.sparse_communities.map((item) => ({
+        id: item.id,
+        label: item.label,
+        nodeCount: item.node_count,
+        density: item.density,
+        members: item.members,
+        internalEdges: item.internal_edges,
+      })),
+      meta: {
+        degraded: response.insights.meta.degraded,
+        nodeCount: response.insights.meta.node_count,
+        edgeCount: response.insights.meta.edge_count,
+        maxInsightNodes: response.insights.meta.max_insight_nodes,
+        maxInsightEdges: response.insights.meta.max_insight_edges,
+      },
+    },
   };
 }
 
@@ -343,4 +493,27 @@ export async function getFileReferences(filePath: string): Promise<FileReference
     content: ref.content,
     createdAt: formatTime(ref.created_at),
   }));
+}
+
+export async function getWikiPages(pageType?: string): Promise<WikiPageSummary[]> {
+  const suffix = pageType ? `?page_type=${encodeURIComponent(pageType)}` : '';
+  const response = await request<{ pages: ApiWikiPageSummary[] }>(`/wiki/pages${suffix}`);
+  return response.pages.map(mapWikiPageSummary);
+}
+
+export async function getWikiPage(path: string): Promise<WikiPageDetail> {
+  const response = await request<ApiWikiPageDetail>(`/wiki/page?path=${encodeURIComponent(path)}`);
+  return mapWikiPageDetail(response);
+}
+
+export async function getWikiGraph(): Promise<WikiGraph> {
+  const response = await request<ApiWikiGraphResponse>('/wiki/graph');
+  return mapWikiGraph(response);
+}
+
+export async function rebuildWiki(clean = false): Promise<ApiWikiRebuildResponse> {
+  return request<ApiWikiRebuildResponse>('/wiki/rebuild', {
+    method: 'POST',
+    body: JSON.stringify({ clean }),
+  });
 }
