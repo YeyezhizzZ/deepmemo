@@ -1,0 +1,14 @@
+scenarios:
+  - id: fs_create_write_read_move
+    name: "文件创建、写入、读取和移动的完整生命周期"
+    description: |
+      通过 API 创建 Markdown 文件，写入更新后的内容，再读取验证内容一致。
+      随后移动文件，并确认新路径可读、旧路径不再出现在文件树中。
+    tags: [fs, critical]
+
+  - id: chat_citation_traceability
+    name: "问答引用可以追溯到源文件和原会话"
+    description: |
+      创建会话和一条带 citation 的 AI 消息，随后通过 citations API
+      获取证据链，并通过 file-references API 从文件路径反查对应会话。
+    tags: [chat, citations, critical]
