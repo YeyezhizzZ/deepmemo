@@ -52,6 +52,8 @@ def get_content(path: str):
     """读取物理文件并返回字符串"""
     try:
         return {"path": path, "content": read_file_content(path)}
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
     except FileNotFoundError as e:
         raise HTTPException(status_code=404, detail=str(e))
 
@@ -62,6 +64,8 @@ def write_file(data: WriteRequest):
     try:
         result = write_file_content(data.path, data.content)
         return {"message": "File written successfully", **result}
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -72,6 +76,8 @@ def move_file_api(data: MoveRequest):
     try:
         result = move_file(data.old_path, data.new_path)
         return {"message": "File moved successfully", **result}
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
     except FileNotFoundError as e:
         raise HTTPException(status_code=404, detail=str(e))
     except Exception as e:
@@ -84,6 +90,8 @@ def patch_sync_status(data: SyncStatusRequest):
     try:
         update_sync_status(data.path, data.sync_status)
         return {"message": "Sync status updated", "path": data.path, "sync_status": data.sync_status}
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -94,6 +102,8 @@ def create_file_api(data: CreateFileRequest):
     try:
         result = create_file(data.path, data.content)
         return {"message": "File created successfully", **result}
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
     except FileExistsError as e:
         raise HTTPException(status_code=409, detail=str(e))
     except Exception as e:
@@ -106,6 +116,8 @@ def create_directory_api(data: CreateDirRequest):
     try:
         result = create_directory(data.path)
         return {"message": "Directory created successfully", **result}
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
     except FileExistsError as e:
         raise HTTPException(status_code=409, detail=str(e))
     except Exception as e:

@@ -1,21 +1,21 @@
 #!/usr/bin/env python3
 """
-测试 ingest pipeline
-用法: python -m src.wiki.test_ingest <source_file>
+手动运行 ingest pipeline
+用法: uv run python scripts/cli_ingest.py <source_file>
 """
 import sys
 from pathlib import Path
 
 # 添加项目根目录到path
-sys.path.insert(0, str(Path(__file__).parent.parent.parent))
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from src.wiki.ingest_pipeline import auto_ingest
 
 
 def main():
     if len(sys.argv) < 2:
-        print("用法: python -m src.wiki.test_ingest <source_file>")
-        print("示例: python -m src.wiki.test_ingest data/diary/2026/425.md")
+        print("用法: uv run python scripts/cli_ingest.py <source_file>")
+        print("示例: uv run python scripts/cli_ingest.py data/diary/2026/425.md")
         sys.exit(1)
 
     source_path = sys.argv[1]

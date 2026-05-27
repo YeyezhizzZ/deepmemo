@@ -1,11 +1,13 @@
+import os
 import hashlib
 import threading
 from pathlib import Path
 from datetime import datetime
 from watchdog.observers import Observer
+from watchdog.observers.polling import PollingObserver
 from watchdog.events import FileSystemEventHandler
 
-DATA_DIR = Path(__file__).resolve().parents[2].parent / "data"
+DATA_DIR = Path(os.getenv("DEEPMEMO_DATA_DIR", Path(__file__).resolve().parents[2].parent / "data"))
 
 def calculate_hash(file_path: Path) -> str:
     """计算文件的 MD5 hash"""
@@ -16,7 +18,7 @@ def calculate_hash(file_path: Path) -> str:
 
 def get_db_connection():
     import sqlite3
-    DATABASE_PATH = Path(__file__).resolve().parents[2].parent / "data.db"
+    DATABASE_PATH = Path(os.getenv("DEEPMEMO_DB_PATH", Path(__file__).resolve().parents[2].parent / "data.db"))
     conn = sqlite3.connect(DATABASE_PATH)
     conn.row_factory = sqlite3.Row
     return conn
@@ -68,7 +70,8 @@ class KnowledgeBaseHandler(FileSystemEventHandler):
 
 class WatcherService:
     def __init__(self, on_change_callback=None):
-        self.observer = Observer()
+        observer_mode = os.getenv("DEEPMEMO_WATCHER_MODE", "").strip().lower()
+        self.observer = PollingObserver() if observer_mode == "polling" else Observer()
         self.handler = KnowledgeBaseHandler(on_change_callback)
 
     def start(self):

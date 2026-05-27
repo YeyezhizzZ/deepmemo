@@ -1,3 +1,4 @@
+import os
 import json
 import uuid
 from datetime import datetime
@@ -19,7 +20,7 @@ from src.routers.wiki import router as wiki_router
 
 
 app = FastAPI(title="DeepMemo API", version="0.2.0")
-DATA_DIR = Path(__file__).resolve().parents[2] / "data"
+DATA_DIR = Path(os.getenv("DEEPMEMO_DATA_DIR", Path(__file__).resolve().parents[2] / "data"))
 app.mount("/assets", StaticFiles(directory=DATA_DIR / "assets", check_dir=False), name="assets")
 
 app.add_middleware(

@@ -6,6 +6,8 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build",
+    "test:browser": "../.venv/bin/python3.11 ../scripts/run_browser_tests.py",
+    "test:browser:run": "playwright test",
     "preview": "vite preview"
   },
   "dependencies": {
@@ -17,8 +19,11 @@
     "vite": "^6.0.0"
   },
   "devDependencies": {
+    "@playwright/test": "^1.60.0",
+    "@types/node": "^25.9.1",
     "@types/react": "^18.3.18",
     "@types/react-dom": "^18.3.5",
-    "typescript": "^5.7.2"
+    "typescript": "^5.7.2",
+    "yaml": "^2.9.0"
   }
 }

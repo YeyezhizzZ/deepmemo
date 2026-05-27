@@ -1,6 +1,8 @@
 import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
 
+const apiProxyTarget = process.env.DEEPMEMO_API_PROXY_TARGET ?? 'http://localhost:8000';
+
 export default defineConfig({
   plugins: [react()],
   publicDir: 'public',
@@ -9,27 +11,27 @@ export default defineConfig({
     port: 5173,
     proxy: {
       '/api/fs': {
-        target: 'http://localhost:8000',
+        target: apiProxyTarget,
         changeOrigin: true,
       },
       '/api/diary': {
-        target: 'http://localhost:8000',
+        target: apiProxyTarget,
         changeOrigin: true,
       },
       '/assets': {
-        target: 'http://localhost:8000',
+        target: apiProxyTarget,
         changeOrigin: true,
       },
       '/api/chat/citations': {
-        target: 'http://localhost:8000',
+        target: apiProxyTarget,
         changeOrigin: true,
       },
       '/api/chat/file-references': {
-        target: 'http://localhost:8000',
+        target: apiProxyTarget,
         changeOrigin: true,
       },
       '/api': {
-        target: 'http://localhost:8000',
+        target: apiProxyTarget,
         changeOrigin: true,
         rewrite: (path) => path.replace(/^\/api/, ''),
       },

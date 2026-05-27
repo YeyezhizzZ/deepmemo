@@ -1,10 +1,11 @@
+import os
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 from typing import Optional
 from pathlib import Path
 
-DATABASE_PATH = Path(__file__).parent.parent.parent / "data.db"
-DATA_DIR = Path(__file__).parent.parent.parent / "data"
+DATABASE_PATH = Path(os.getenv("DEEPMEMO_DB_PATH", Path(__file__).parent.parent.parent / "data.db"))
+DATA_DIR = Path(os.getenv("DEEPMEMO_DATA_DIR", Path(__file__).parent.parent.parent / "data"))
 
 router = APIRouter(prefix="/api/diary", tags=["diary"])
 

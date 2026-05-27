@@ -1,3 +1,4 @@
+import os
 import subprocess
 from pathlib import Path
 from datetime import datetime, date
@@ -5,7 +6,7 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 from typing import Optional
 
-DATA_DIR = Path(__file__).parent.parent.parent.parent / "data"
+DATA_DIR = Path(os.getenv("DEEPMEMO_DATA_DIR", Path(__file__).parent.parent.parent.parent / "data"))
 
 router = APIRouter(prefix="/api/pulse", tags=["pulse"])
 

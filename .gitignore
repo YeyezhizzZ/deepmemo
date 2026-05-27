@@ -26,6 +26,8 @@ dist/
 build/
 out/
 .cache/
+app/test-results/
+app/playwright-report/
 
 # IDE / editor
 .vscode/
@@ -53,3 +55,4 @@ agents.md
 claude.md
 
 reference/*
+app/test-results/

@@ -1,7 +1,8 @@
+import os
 import sqlite3
 from pathlib import Path
 
-DATABASE_PATH = Path(__file__).parent.parent.parent / "data.db"
+DATABASE_PATH = Path(os.getenv("DEEPMEMO_DB_PATH", Path(__file__).parent.parent.parent / "data.db"))
 
 
 def get_db_connection():

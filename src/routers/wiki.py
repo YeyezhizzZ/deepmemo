@@ -4,6 +4,7 @@ from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel, Field
 
 from src.wiki.ingest import DiaryWikiIngestConfig, run_diary_wiki_ingest
+from src.wiki.constants import WIKI_DIR
 from src.wiki.graph import build_diary_graph
 from src.wiki.health import build_wiki_health_report
 from src.wiki.frontmatter import build_default_frontmatter, read_markdown_page, render_markdown_page
@@ -111,7 +112,7 @@ def ingest_source(data: IngestRequest):
         raise HTTPException(status_code=404, detail=f"Source file not found: {data.source_path}")
 
     # 读取现有的index和overview作为上下文
-    wiki_dir = Path("data/wiki")
+    wiki_dir = WIKI_DIR
     index_path = wiki_dir / "index.md"
     overview_path = wiki_dir / "overview.md"
 

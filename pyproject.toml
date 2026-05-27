@@ -23,13 +23,15 @@ dependencies = [
 dev = [
     "pytest>=8.0",
     "httpx>=0.27",
+    "pytest-asyncio>=1.4.0",
 ]
 
 [tool.pytest.ini_options]
-testpaths = ["src"]
+testpaths = ["tests"]
 python_files = "test_*.py"
 python_classes = "Test*"
 python_functions = "test_*"
+asyncio_mode = "auto"
 markers = [
     "e2e: end-to-end scenario tests (may be slower)",
 ]

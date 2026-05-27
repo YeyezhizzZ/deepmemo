@@ -1,3 +1,4 @@
+import os
 import hashlib
 import uuid
 from pathlib import Path
@@ -7,8 +8,8 @@ import sqlite3
 import re
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
-DATABASE_PATH = REPO_ROOT / "data.db"
-DATA_DIR = REPO_ROOT / "data"
+DATABASE_PATH = Path(os.getenv("DEEPMEMO_DB_PATH", REPO_ROOT / "data.db"))
+DATA_DIR = Path(os.getenv("DEEPMEMO_DATA_DIR", REPO_ROOT / "data"))
 
 def natural_name_key(path: Path):
     """Sort date-like numeric names newest first, with hidden entries after visible entries."""
@@ -48,6 +49,27 @@ def get_db_connection():
     conn.row_factory = sqlite3.Row
     return conn
 
+
+def normalize_data_relative_path(file_path: str) -> str:
+    normalized = str(file_path).strip().replace("\\", "/")
+    while normalized.startswith("./"):
+        normalized = normalized[2:]
+    if normalized.startswith("/") or normalized == ".." or normalized.startswith("../"):
+        raise ValueError(f"Path escapes data directory: {file_path}")
+    if normalized.startswith("data/"):
+        normalized = normalized[len("data/"):]
+    return normalized
+
+
+def resolve_data_path(file_path: str) -> Path:
+    relative_path = normalize_data_relative_path(file_path)
+    full_path = (DATA_DIR / relative_path).resolve()
+    try:
+        full_path.relative_to(DATA_DIR.resolve())
+    except ValueError as exc:
+        raise ValueError(f"Path escapes data directory: {file_path}") from exc
+    return full_path
+
 def compute_file_hash(file_path: Path) -> str:
     if not file_path.exists():
         return ""
@@ -79,6 +101,7 @@ def upsert_file_meta(file_path: str, file_hash: str, sync_status: str):
     conn.close()
 
 def update_sync_status(file_path: str, sync_status: str):
+    file_path = normalize_data_relative_path(file_path)
     conn = get_db_connection()
     cursor = conn.cursor()
     now = datetime.now().isoformat()
@@ -89,17 +112,18 @@ def update_sync_status(file_path: str, sync_status: str):
     conn.commit()
     conn.close()
     if result.rowcount == 0:
-        upsert_file_meta(file_path, compute_file_hash(DATA_DIR / file_path), sync_status)
+        upsert_file_meta(file_path, compute_file_hash(resolve_data_path(file_path)), sync_status)
 
 def read_file_content(file_path: str) -> str:
-    full_path = DATA_DIR / file_path
+    full_path = resolve_data_path(file_path)
     if not full_path.exists():
         raise FileNotFoundError(f"File not found: {file_path}")
     with open(full_path, "r", encoding="utf-8") as f:
         return f.read()
 
 def write_file_content(file_path: str, content: str) -> dict:
-    full_path = DATA_DIR / file_path
+    file_path = normalize_data_relative_path(file_path)
+    full_path = resolve_data_path(file_path)
     full_path.parent.mkdir(parents=True, exist_ok=True)
     with open(full_path, "w", encoding="utf-8") as f:
         f.write(content)
@@ -114,8 +138,10 @@ def write_file_content(file_path: str, content: str) -> dict:
     }
 
 def move_file(old_path: str, new_path: str) -> dict:
-    old_full = DATA_DIR / old_path
-    new_full = DATA_DIR / new_path
+    old_path = normalize_data_relative_path(old_path)
+    new_path = normalize_data_relative_path(new_path)
+    old_full = resolve_data_path(old_path)
+    new_full = resolve_data_path(new_path)
     if not old_full.exists():
         raise FileNotFoundError(f"Source file not found: {old_path}")
     new_full.parent.mkdir(parents=True, exist_ok=True)
@@ -133,7 +159,8 @@ def move_file(old_path: str, new_path: str) -> dict:
 
 def create_file(file_path: str, content: str = "") -> dict:
     """创建新文件"""
-    full_path = DATA_DIR / file_path
+    file_path = normalize_data_relative_path(file_path)
+    full_path = resolve_data_path(file_path)
     if full_path.exists():
         raise FileExistsError(f"File already exists: {file_path}")
     full_path.parent.mkdir(parents=True, exist_ok=True)
@@ -150,7 +177,8 @@ def create_file(file_path: str, content: str = "") -> dict:
 
 def create_directory(dir_path: str) -> dict:
     """创建新目录"""
-    full_path = DATA_DIR / dir_path
+    dir_path = normalize_data_relative_path(dir_path)
+    full_path = resolve_data_path(dir_path)
     if full_path.exists():
         raise FileExistsError(f"Directory already exists: {dir_path}")
     full_path.mkdir(parents=True, exist_ok=True)

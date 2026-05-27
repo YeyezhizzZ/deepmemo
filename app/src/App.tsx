@@ -309,6 +309,20 @@ function formatEditorMarkdown(value: string): string {
     .trimStart();
 }
 
+type BrowserTestEditorHook = {
+  setEditorMarkdown: (value: string) => void;
+  getEditorMarkdown: () => string;
+};
+
+declare global {
+  interface Window {
+    __DEEPMEMO_TEST__?: {
+      editor?: BrowserTestEditorHook;
+      setEditorValue?: (value: string) => void;
+    };
+  }
+}
+
 function VditorMarkdownEditor({
   sourcePath,
   value,
@@ -378,9 +392,21 @@ function VditorMarkdownEditor({
     });
 
     editorRef.current = editor;
+    if (typeof window !== 'undefined') {
+      window.__DEEPMEMO_TEST__ = window.__DEEPMEMO_TEST__ ?? {};
+      window.__DEEPMEMO_TEST__.editor = {
+        setEditorMarkdown: (nextValue: string) => {
+          onChangeRef.current(nextValue);
+        },
+        getEditorMarkdown: () => editor.getValue(),
+      };
+    }
 
     return () => {
       editor.destroy();
+      if (typeof window !== 'undefined' && window.__DEEPMEMO_TEST__?.editor?.getEditorMarkdown() === editor.getValue()) {
+        delete window.__DEEPMEMO_TEST__.editor;
+      }
       if (editorRef.current === editor) {
         editorRef.current = undefined;
       }
@@ -400,7 +426,7 @@ function VditorMarkdownEditor({
     editor.setValue(normalized, true);
   }, [value]);
 
-  return <div className="vditor-editor-host" ref={mountRef} />;
+  return <div className="vditor-editor-host" data-testid="markdown-editor" ref={mountRef} />;
 }
 
 function mapCitationsToSources(messageId: string, citations: Citation[]): SourcePanelItem[] {
@@ -579,7 +605,7 @@ function ModeSidebar({
             </button>
           </div>
 
-          <nav className="file-tree" aria-label="data 文件树">
+          <nav className="file-tree" aria-label="data 文件树" data-testid="file-tree">
             {files.map((node) => (
               <FileTreeNode
                 key={node.id}
@@ -694,13 +720,14 @@ function ModeSidebar({
                   {isExpanded && nodes.map((node) => {
                     const isActive = node.path === activeWikiNodeId;
                     return (
-                      <button
-                        type="button"
-                        key={node.path}
-                        className={isActive ? 'wiki-item wiki-item--active' : 'wiki-item'}
-                        onClick={() => onSelectWikiNode(node.path)}
-                        title={node.title}
-                      >
+                    <button
+                      type="button"
+                      key={node.path}
+                      className={isActive ? 'wiki-item wiki-item--active' : 'wiki-item'}
+                      onClick={() => onSelectWikiNode(node.path)}
+                      title={node.title}
+                      data-testid={`wiki-node:${node.path}`}
+                    >
                         <span className={`wiki-item__badge wiki-item__badge--${node.type}`}>{typeLabels[node.type] ?? node.type}</span>
                         <span className="wiki-item__title">{node.title}</span>
                       </button>
@@ -755,6 +782,9 @@ function FileTreeNode({
         style={{ paddingLeft: 10 + level * 16 }}
         onClick={handleClick}
         title={node.path}
+        data-testid={`file-node:${node.path}`}
+        data-node-path={node.path}
+        data-node-type={node.type}
       >
         <span className="file-node__chevron">
           {isFolder ? (isExpanded ? <ChevronDown size={14} /> : <ChevronRight size={14} />) : null}
@@ -2125,6 +2155,12 @@ export function App() {
       });
     }
   };
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    window.__DEEPMEMO_TEST__ = window.__DEEPMEMO_TEST__ ?? {};
+    window.__DEEPMEMO_TEST__.setEditorValue = setActiveEditorValue;
+  }, [setActiveEditorValue]);
 
   const refreshSessionList = async (preferredSessionId?: string) => {
     const remoteSessions = await listSessions();
