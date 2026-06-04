@@ -19,6 +19,32 @@
 **备注**: 可选补充。
 ```
 
+## 5. 微信公众号每日抓取改成 OpenCLI 优先
+
+**类型**: 功能 / 技术债
+**状态**: 待实现
+
+**问题描述**: `blog-diary-fetch` 需要每天抓取 `config/blog_sources.yaml` 里配置的公众号，并把昨天更新的内容写入日记。但现有链路对微信文章 URL 的发现不稳定，Tavily 只能辅助发现，不能稳定保证昨天文章一定能被拿到；公众号主页 `profile_url` 和历史页 fallback 也已经证明不可靠。
+
+**目标**: 建立一条可每日稳定运行的链路，优先通过 OpenCLI 的 `weixin search` + `weixin download` 发现并下载公众号昨天文章；如果 OpenCLI 当次无法返回可用文章，再回退到 Tavily 做 URL 补搜和摘要兜底。最终结果要能自动写入当天 diary 文件，并保留原始抓取结果和 warnings，便于补抓和回溯。
+
+**涉及位置**:
+- `.claude/skills/blog-diary-fetch/SKILL.md` - skill 说明、执行流程、OpenCLI/Tavily 路由
+- `.claude/skills/blog-diary-fetch/subagent-template.md` - 子 agent 执行模板
+- `.claude/skills/blog-diary-fetch/scripts/fetch_blogs.py` - 兼容入口
+- `.agents/skills/blog-diary-fetch/core/blog_fetcher.py` - 实际微信发现/下载实现
+- `reference/OpenCLI/clis/weixin/search.js` - OpenCLI 微信公众号搜索实现
+- `reference/OpenCLI/clis/weixin/download.js` - OpenCLI 微信公众号文章导出实现
+- `.claude/skills/blog-diary-fetch/config/blog_sources.yaml` - 公众号来源配置
+
+**备注**: OpenCLI 负责稳定的公众号文章搜索和下载，Tavily 只作为 fallback：当 OpenCLI 搜不到、解析失败或下载失败时，才用 Tavily 补 URL / 补摘要，不应再依赖搜狗 `profile_url` 或公众号历史页。
+
+**补充验证**: 已在真实浏览器会话中确认，手动提供 `mp.weixin.qq.com/s/...` 文章 seed URL 时，OpenCLI 可以稳定打开文章页、读取作者/发布时间/正文，并继续向后处理；但“点击公众号名称直接进入可批量抓最新文章的列表页”目前不应作为主链路依赖，只能算 best-effort 探索。
+
+**重要限制**: `OpenCLI weixin search` 底层是搜狗微信搜索，不是微信官方实时索引，因此不能假设它对“昨天刚发的文章”是实时可见的。实际使用时，搜狗结果只能当候选来源，最终是否入库必须以后验的文章页发布时间为准；如果要提高昨天内容的命中率，优先使用配置里的文章 seed URL，而不是依赖搜索结果即时收录。
+
+**决策人**: gzy
+
 ## 1. 硬编码问题
 
 **类型**: 技术债
@@ -168,7 +194,7 @@ MVP 阶段前端保持现有对话 UI，只需要确保每轮请求都带上稳�
 **目标**: 稳定拿到公众号当天文章 `article_url`，不再依赖搜狗 `profile_url`；如果 Tavily 没有返回可用文章 URL，要返回细分 warning，而不是只输出泛化失败。
 
 **涉及位置**:
-- `.agents/skills/blog-diary-fetch/src/app/core/blog_fetcher.py` - `TavilySearchClient.discover_wechat_articles()` / `BlogDiaryService.collect_wechat_entries()`
+- `.agents/skills/blog-diary-fetch/core/blog_fetcher.py` - `TavilySearchClient.discover_wechat_articles()` / `BlogDiaryService.collect_wechat_entries()`
 - `.agents/skills/blog-diary-fetch/tests/test_wechat_web_search.py` - Tavily URL 发现、空结果 warning、正文降级回归测试
 - `.agents/skills/blog-diary-fetch/config/web_search.yaml` - Tavily API key 与启用配置
 - `.agents/skills/blog-diary-fetch/SKILL.md` - 公众号抓取流程说明
@@ -193,7 +219,7 @@ MVP 阶段前端保持现有对话 UI，只需要确保每轮请求都带上稳�
 | Microsoft | ✅ 可以 | 标准博客，有公开页面 |
 | Jina | ✅ 可以 | 标准博客，有公开页面 |
 | OpenAI | ✅ 可以 | 标准博客，有公开页面 |
-| 微信公众号 (mp.weixin.qq.com) | ✅ 可用但有限制 | 通过 Tavily Web Search 发现公众号当天文章 URL，再按文章页发布时间和正文抽取结果过滤昨天内容；适合每日自动化增量抓取 |
+| 微信公众号 (mp.weixin.qq.com) | ✅ 可用但有限制 | 通过 OpenCLI `weixin search` / `weixin download` 发现并抓取公众号当天文章；Tavily 仅作为 URL 补搜和摘要兜底 |
 
 ### 订阅源列表
 
@@ -244,8 +270,8 @@ MVP 阶段前端保持现有对话 UI，只需要确保每轮请求都带上稳�
 **工作流**:
 1. 读取固定订阅源配置，区分 `blog`、`rss`、`wechat` 三类来源
 2. 对国外工程博客/RSS 源抓取列表页或 feed，筛选昨天 00:00-23:59（北京时间）之间的新文章
-3. 对微信公众号先用 Tavily Web Search 发现 `mp.weixin.qq.com/s/...` 文章 URL，再按文章页发布时间和正文抽取结果过滤昨天内容
-4. 对命中的微信公众号文章，优先抓取正文并抽取全文；如果正文抽取失败，则回退到 Tavily 搜索返回的标题和摘要
+3. 对微信公众号先用 OpenCLI `weixin search` 发现 `mp.weixin.qq.com/s/...` 文章 URL，再用 `weixin download` 抓正文和发布时间
+4. 对命中的微信公众号文章，优先抓取正文并抽取全文；如果正文抽取失败，则回退到搜索摘要或 Tavily 补搜结果
 5. 用 LLM 生成「标题 + 链接 + 一句话摘要 + 嵌套思考」，并按来源去重
 6. 按日期写入 `data/diary/{月日}.md`，追加到 `## 工程博客` 段落
 7. 同步落盘一份原始抓取结果到 `data/raw/wechat/{YYYY-MM-DD}.json`，便于回溯和补抓
@@ -262,8 +288,8 @@ MVP 阶段前端保持现有对话 UI，只需要确保每轮请求都带上稳�
 | 步骤 | 内容 |
 |------|------|
 | 1 | 创建 `scripts/fetch_blogs.py`，统一读取工程博客、RSS 和微信公众号配置 |
-| 2 | 为微信公众号接入 Tavily URL 发现，按昨天时间窗过滤文章页发布时间 |
-| 3 | 对命中的新文章抓正文并生成摘要，正文失败时自动降级到标题/摘要 |
+| 2 | 为微信公众号接入 OpenCLI URL 发现与正文导出，按昨天时间窗过滤文章页发布时间 |
+| 3 | 对命中的新文章抓正文并生成摘要，正文失败时自动降级到标题/摘要，并保留 Tavily fallback |
 | 4 | 按日期写入 `data/diary/{月日}.md`，追加到 `## 工程博客` 段落 |
 | 5 | 将每次抓取结果写入 `data/raw/wechat/`，防止公众号临时链接过期后无法追溯 |
 | 6 | 设置每日凌晨定时任务，保证“昨天内容”按自然日稳定入库 |
@@ -300,14 +326,14 @@ MVP 阶段前端保持现有对话 UI，只需要确保每轮请求都带上稳�
    - `cd /path/to/DeepMemo`
    - `uv run python scripts/fetch_blogs.py --config config/blog_sources.yaml --json`
 4. cron 里不要再拆第二个“生成日记脚本”，抓取、摘要、写入已经封装在同一个入口里
-5. 如果服务器上的代码还停留在旧版搜狗链路，先把根目录 `src/app/core/blog_fetcher.py` 同步到 Tavily-only + 日记生成的最终版，再上线 cron
+5. 如果服务器上的代码还停留在旧版搜狗链路，先把根目录 `src/app/core/blog_fetcher.py` 同步到 OpenCLI-first + Tavily fallback + 日记生成的最终版，再上线 cron
 6. 如果服务器使用 `uv` 管理项目环境，cron 直接调用 `uv run python scripts/fetch_blogs.py --config config/blog_sources.yaml --json` 即可；不要让 cron 自己拼抓取逻辑
 7. 定时任务执行时必须保证工作目录是仓库根目录，否则 `config/blog_sources.yaml`、`config/web_search.yaml` 和 `data/diary/` 的相对路径会失效
 8. 建议给 cron 命令补上日志重定向，方便排障：
    - `cd /path/to/DeepMemo && uv run python scripts/fetch_blogs.py --config config/blog_sources.yaml --json >> logs/blog-diary-fetch.log 2>&1`
 
 **当前代码现状**:
-- `.agents/skills/blog-diary-fetch/` 里的 skill 版本已经验证过 Tavily-only 抓取 + LLM 摘要 + 写日记链路
+- `.agents/skills/blog-diary-fetch/` 里的 skill 版本已经验证过 OpenCLI-first 抓取 + LLM 摘要 + 写日记链路
 - 根目录生产入口已经存在，但生产核心逻辑还需要和 skill 版本再对齐一次，避免服务器跑到旧逻辑
 
 ### 最终方案
@@ -316,7 +342,7 @@ MVP 阶段前端保持现有对话 UI，只需要确保每轮请求都带上稳�
 
 **生产链路**:
 1. `cron` 定时执行抓取脚本，读取公众号和工程博客配置
-2. 脚本优先通过 Tavily 发现公众号当天文章 URL，抓取正文并落盘原始结果
+2. 脚本优先通过 OpenCLI 发现并下载公众号当天文章 URL，抓取正文并落盘原始结果；Tavily 只在 OpenCLI 失败时兜底
 3. LLM API 负责把已抓到的标题、摘要、正文整理成日记文案
 4. 脚本按日期写入 `data/diary/{月日}.md`
 5. 抓取失败时只影响单条来源，warning 单独记录，不中断整批任务
@@ -324,7 +350,7 @@ MVP 阶段前端保持现有对话 UI，只需要确保每轮请求都带上稳�
 **角色分工**:
 - `scripts/fetch_blogs.py`: 生产执行入口
 - `config/blog_sources.yaml`: 来源配置
-- `config/web_search.yaml`: Tavily 配置
+- `reference/OpenCLI/`: 微信公众号搜索与下载实现参考
 - `blog-diary-fetch skill`: 开发、补抓、调试、回归验证
 
 **决策理由**:
