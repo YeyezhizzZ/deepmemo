@@ -37,10 +37,10 @@ Docs-only 改动至少运行：
 git diff --check
 ```
 
-如果改了项目 wiki，还要运行：
+如果改了 VitePress 文档站，还要运行：
 
 ```bash
-cd docs
+cd docs/wiki
 npm run docs:build
 ```
 
@@ -49,7 +49,7 @@ npm run docs:build
 提交信息建议说明目标和范围，例如：
 
 ```text
-docs: add project wiki site
+docs: update docs site
 ```
 
 如果某个 Goal 实现完成并通过验证，需要把 Goal 状态更新为 `Implemented`，并同步受影响的 current specs。

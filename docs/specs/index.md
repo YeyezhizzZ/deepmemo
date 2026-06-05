@@ -12,15 +12,15 @@ DeepMemo 的 spec 体系给 AI coding agent 和人类协作者提供共同的行
 
 ## Baseline Specs
 
-- [Constitution](./constitution)
-- [AI Chat & RAG](./ai-chat-rag)
-- [Query Routing](./query-routing)
-- [Wiki Graph](./wiki-graph)
-- [Wiki Ingestion](./wiki-ingestion)
-- [File System Watcher](./fs-watcher)
-- [Asset Manager](./asset-manager)
-- [Test Infrastructure](./test-infrastructure)
-- [Agentic Testing](./agentic-testing)
+- [Constitution](/specs/constitution)
+- [AI Chat & RAG](/specs/current/ai-chat-rag)
+- [Query Routing](/specs/current/query-routing)
+- [Wiki Graph](/specs/current/wiki-graph)
+- [Wiki Ingestion](/specs/current/wiki-ingestion)
+- [File System Watcher](/specs/current/fs-watcher)
+- [Asset Manager](/specs/current/asset-manager)
+- [Test Infrastructure](/specs/current/test-infrastructure)
+- [Agentic Testing](/specs/current/agentic-testing)
 
 ## 生命周期
 

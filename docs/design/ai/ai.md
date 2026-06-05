@@ -151,7 +151,7 @@ QueryRouter
 
 ### 2026-05-03 系统集成补充
 
-集成原则：遵守 `docx/design.md` 的前后端对接约定，不新增必填字段、不改变 `SessionResponse` 和 `MessageResponse` 结构。AI 能力只作为 `/chat` 的内部实现升级，对前端仍表现为发送用户消息并返回一条 `role="ai"` 的 Markdown 内容。
+集成原则：遵守 `docs/design/backend/api.md` 的前后端对接约定，不新增必填字段、不改变 `SessionResponse` 和 `MessageResponse` 结构。AI 能力只作为 `/chat` 的内部实现升级，对前端仍表现为发送用户消息并返回一条 `role="ai"` 的 Markdown 内容。
 
 已完成：
 

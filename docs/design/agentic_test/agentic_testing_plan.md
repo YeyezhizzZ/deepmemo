@@ -55,7 +55,7 @@ DeepMemo 已经有一套基础测试体系：
 - `openspec/specs/wiki/spec.md`：Wiki baseline spec。
 - `openspec/specs/agentic-testing/spec.md`：agentic testing baseline spec。
 - `openspec/changes/spec-to-test-pilot/`：Spec-to-Test 试点 change，用来示范 proposal、delta spec、design、tasks 的协作方式。
-- `docx/agentic_test/spec_to_test_prompt.md`：把 OpenSpec scenarios 转成测试矩阵的固定提示词。
+- `docs/design/agentic_test/spec_to_test_prompt.md`：把 OpenSpec scenarios 转成测试矩阵的固定提示词。
 - `tests/e2e/scenarios.yaml`：已经给关键场景补了 `spec` 追踪字段。
 - `.agents/skills/agentic-test/`：已经更新为 OpenSpec 优先的测试工作流。
 
@@ -400,7 +400,7 @@ DeepMemo 当前已有的 Harness 包括：
 建议新增：
 
 ```text
-docx/specs/
+docs/specs/
 ├── README.md
 ├── template.feature.md
 └── template.test.md

@@ -461,7 +461,7 @@ MVP 阶段保持现有 API 接口不变，内部替换为 Agent SDK：
   - 已接入社区图谱 + 节点详情
   - 已支持前端触发 Wiki 重建并刷新图谱
 - 文档
-  - 已在 `docx/frontend/frontend_v3.md` 里补充 Wiki Workspace 与重建链路说明
+  - 已在 `docs/design/frontend/frontend_v3.md` 里补充 Wiki Workspace 与重建链路说明
 
 **遗留问题**:
 - 当前知识页仍有一部分 term 噪声，需要继续收紧词抽取和页面筛选
@@ -475,7 +475,7 @@ MVP 阶段保持现有 API 接口不变，内部替换为 Agent SDK：
 - `src/wiki/graph.py` - page-level graph + community detection
 - `src/routers/wiki.py` - rebuild / graph API
 - `app/src/App.tsx` - Wiki Workspace UI
-- `docx/frontend/frontend_v3.md` - 前端方案说明
+- `docs/design/frontend/frontend_v3.md` - 前端方案说明
 
 **决策人**: gzy
 

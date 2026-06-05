@@ -19,7 +19,7 @@ Spec Kit constitution
   -> Test Spec matrix
   -> L1/L2/L3/Browser tests
   -> verify quick/full
-  -> archive/sync specs
+  -> 归档/同步 specs
 ```
 
 ## 开源初始化对照
@@ -52,7 +52,7 @@ OpenSpec 侧：
 
 - 必须保留的是 `.specify/memory/constitution.md`、`openspec/config.yaml`、`openspec/specs/` 和 `openspec/changes/`
 - 可选保留的是 `.specify/templates/` 和 `.specify/workflows/`，如果你想继续做本地 custom workflow
-- 不建议把 OpenSpec 的 change 结构搬进 `docx/`，`docx/` 只保留方法论、模板和执行说明
+- 不建议把 OpenSpec 的 change 结构搬进 `docs/design/`，`docs/design/` 只保留方法论、模板和执行说明
 
 ## 目标结构
 
@@ -106,7 +106,7 @@ scripts/verify.py
 8. 跑目标测试。
 9. 跑 `uv run python scripts/verify.py --mode quick`。
 10. 对 E2E、浏览器或多模块改动跑 `uv run python scripts/verify.py --mode full`。
-11. archive/sync OpenSpec change，并回写 skill 经验。
+11. 归档/同步 OpenSpec change，并回写 skill 经验。
 
 ## 已完成
 
@@ -117,7 +117,7 @@ scripts/verify.py
 - [x] 创建 `openspec/specs/wiki/spec.md`，覆盖 wiki page、tree、graph、health、policy、ingest、rebuild。
 - [x] 创建 `openspec/specs/agentic-testing/spec.md`，覆盖 Spec Kit + OpenSpec + 测试分层工作流。
 - [x] 创建 `openspec/changes/spec-to-test-pilot/`，作为 Spec-to-Test 试点 change 样例。
-- [x] 创建 `docx/agentic_test/spec_to_test_prompt.md`，作为从 OpenSpec scenarios 生成测试矩阵的固定提示词。
+- [x] 创建 `docs/design/agentic_test/spec_to_test_prompt.md`，作为从 OpenSpec scenarios 生成测试矩阵的固定提示词。
 - [x] 更新 `tests/e2e/scenarios.yaml`，为关键场景增加 `spec` 追踪字段。
 - [x] 更新 `.agents/skills/agentic-test/` 与 `AGENTS.md`，把 OpenSpec 优先流程写入仓库规则。
 - [x] 在临时目录里验证 Spec Kit / OpenSpec 的初始化文件结构，并把结果收敛回文档。
@@ -161,7 +161,7 @@ scripts/verify.py
 - [x] 更新 `.agents/skills/agentic-test/references/examples.md`，加入从 OpenSpec 生成测试的例子。
 - [x] 更新 `AGENTS.md`，把 Spec Kit + OpenSpec 作为应用代码变更的默认要求。
 - [x] 更新 `tests/e2e/scenarios.yaml`，给场景补充 `spec` 追踪字段。
-- [x] 新增 `docx/agentic_test/spec_to_test_prompt.md` 作为固定测试矩阵生成入口。
+- [x] 新增 `docs/design/agentic_test/spec_to_test_prompt.md` 作为固定测试矩阵生成入口。
 
 ### Phase 6：跑一个端到端试点
 
@@ -199,8 +199,8 @@ scripts/verify.py
 文档、spec、skill 修改后：
 
 ```bash
-find .specify openspec docx/agentic_test .agents/skills/agentic-test -maxdepth 4 -type f | sort
-git diff --check -- .specify openspec docx/agentic_test .agents/skills/agentic-test AGENTS.md tests/e2e/scenarios.yaml
+find .specify openspec docs/design/agentic_test .agents/skills/agentic-test -maxdepth 4 -type f | sort
+git diff --check -- .specify openspec docs/design/agentic_test .agents/skills/agentic-test AGENTS.md tests/e2e/scenarios.yaml
 ```
 
 应用代码或测试修改后：

@@ -81,20 +81,20 @@ npm run test:browser
 安装文档依赖：
 
 ```bash
-cd docs
+cd docs/wiki
 npm install
 ```
 
 本地预览：
 
 ```bash
-cd docs
+cd docs/wiki
 npm run docs:dev
 ```
 
 构建静态站点：
 
 ```bash
-cd docs
+cd docs/wiki
 npm run docs:build
 ```

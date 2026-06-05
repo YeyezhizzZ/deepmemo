@@ -2,7 +2,7 @@
 
 > 最后更新：2026-05-26（含代码审查修正）。基于 `reference/llm_wiki/llm_wiki` 的设计，并结合 DeepMemo 的全量日记编译、全局语义去重重构、Louvain 聚类优化以及未来的自进化 Agent 技能反哺路线，是一份完整的架构规格书。
 > 
-> 详细的思考过程和取舍论证见 [think.md](file:///Users/guoziyang/code/engineering_lab/DeepMemo/docx/ai/llm_wiki/think.md)。
+> 详细的思考过程和取舍论证见 [阶段性思考记录](./notes)。
 
 ---
 

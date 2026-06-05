@@ -5,7 +5,7 @@ DeepMemo/
 ├── app/                 # React + Vite frontend
 ├── config/              # LLM, web search, wiki prompt and source configs
 ├── data/                # local knowledge base
-├── docs/                # specs, archive and this VitePress wiki
+├── docs/                # specs, design notes and VitePress docs site
 ├── scripts/             # verification and helper scripts
 ├── src/                 # FastAPI backend and AI/wiki modules
 ├── tests/               # pytest API/unit/e2e tests
@@ -63,6 +63,5 @@ DeepMemo/
 | `docs/specs/current/` | Human-reviewed baseline specs |
 | `docs/specs/goals/` | Goal specs |
 | `docs/specs/deprecated.md` | D 类废弃行为 |
-| `docs/archive/` | 历史材料，不是设计权威 |
-| `docs/.vitepress/` | 项目 wiki 站点配置 |
-| `docs/guide/`, `docs/how-to/`, `docs/reference/`, `docs/explanation/` | Diátaxis 文档内容 |
+| `docs/design/` | 历史设计材料与架构笔记，不是行为权威 |
+| `docs/wiki/` | VitePress 文档站工程；进入该目录就是前端文档站 |

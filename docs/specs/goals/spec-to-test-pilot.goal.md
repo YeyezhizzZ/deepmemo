@@ -30,7 +30,7 @@ DeepMemo 已经有测试底座，但测试用例来源仍容易依赖 Agent 临�
 
 ## 9. Task Breakdown
 - [ ] 读取 `openspec/changes/spec-to-test-pilot` 残留的设计草图
-- [ ] 编写专用的 Spec-to-Test 提词模板 `docx/agentic_test/spec_to_test_prompt.md`
+- [ ] 编写专用的 Spec-to-Test 提词模板 `docs/design/agentic_test/spec_to_test_prompt.md`
 - [ ] 更新 `agentic-testing.md` 基线，正式确认该流程
 
 ## 10. Validation Plan

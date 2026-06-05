@@ -52,9 +52,9 @@ uv run pytest tests/e2e/ -q --tb=short
 
 ## 文档站验证
 
-项目 wiki 的构建命令是：
+VitePress 文档站的构建命令是：
 
 ```bash
-cd docs
+cd docs/wiki
 npm run docs:build
 ```

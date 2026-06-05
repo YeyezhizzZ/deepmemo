@@ -11,6 +11,12 @@ hero:
     - theme: alt
       text: 架构概览
       link: /explanation/architecture
+    - theme: alt
+      text: 设计材料
+      link: /design/
+    - theme: alt
+      text: Specs
+      link: /specs/
 features:
   - icon: 📝
     title: 本地优先
@@ -24,4 +30,10 @@ features:
   - icon: 🔍
     title: 轻量搜索
     details: ripgrep 足以服务个人 Markdown 知识库，避免过早引入 Vector DB 维护成本。
+  - icon: 🧭
+    title: 设计材料
+    details: 历史方案、架构笔记和阶段性计划统一从 Design 导航进入。
+  - icon: 📐
+    title: Spec 体系
+    details: Human-reviewed specs 保留在 docs/specs，同时可在文档站内浏览。
 ---
