@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="DeepMemo">
+  <rect width="64" height="64" rx="14" fill="#256f6c"/>
+  <path d="M18 17h18c7 0 12 5 12 12s-5 12-12 12H25v7h-7V17Zm7 7v17h10c4 0 7-3 7-8s-3-9-7-9H25Z" fill="#fff"/>
+  <path d="M26 48h23v6H26z" fill="#d9b45f"/>
+</svg>
