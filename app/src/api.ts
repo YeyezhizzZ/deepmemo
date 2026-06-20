@@ -23,6 +23,16 @@ import type {
   KnowledgeHealth,
   ApiRepoWikiPage,
   RepoWikiPage,
+  ApiKnowledgeViewModel,
+  ApiKnowledgeHtmlPage,
+  ApiKnowledgeReviewItem,
+  ApiKnowledgeRelationNode,
+  ApiKnowledgeCardSummary,
+  KnowledgeViewModel,
+  KnowledgeHtmlPage,
+  KnowledgeReviewItem,
+  KnowledgeRelationNode,
+  KnowledgeCardSummary,
 } from './types';
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? '/api';
@@ -149,6 +159,88 @@ function mapRepoWikiPage(page: ApiRepoWikiPage): RepoWikiPage {
     content: page.content,
     cardSlugs: page.card_slugs,
     path: page.path,
+  };
+}
+
+function mapKnowledgeHtmlPage(page: ApiKnowledgeHtmlPage): KnowledgeHtmlPage {
+  return {
+    slug: page.slug,
+    title: page.title,
+    path: page.path,
+    summary: page.summary,
+    cardSlugs: page.card_slugs,
+    sections: page.sections.map((section) => ({
+      cardSlug: section.card_slug,
+      title: section.title,
+      type: section.type,
+      definition: section.definition,
+      keyFacts: section.key_facts,
+      sources: section.sources,
+      relatedCards: section.related_cards,
+      tags: section.tags,
+    })),
+  };
+}
+
+function mapKnowledgeReviewItem(item: ApiKnowledgeReviewItem): KnowledgeReviewItem {
+  return {
+    id: item.id,
+    kind: item.kind,
+    severity: item.severity,
+    title: item.title,
+    summary: item.summary,
+    cardSlugs: item.card_slugs,
+    sourcePaths: item.source_paths,
+    suggestedAction: item.suggested_action,
+    status: item.status,
+    updatedAt: item.updated_at ?? undefined,
+    rewrite: item.rewrite
+      ? {
+          field: item.rewrite.field,
+          instruction: item.rewrite.instruction,
+          proposedDefinition: item.rewrite.proposed_definition,
+        }
+      : undefined,
+  };
+}
+
+function mapKnowledgeRelationNode(node: ApiKnowledgeRelationNode): KnowledgeRelationNode {
+  return {
+    id: node.id,
+    title: node.title,
+    type: node.type,
+    tags: node.tags,
+    sourceCount: node.source_count,
+    degreeHint: node.degree_hint,
+  };
+}
+
+function mapKnowledgeCardSummary(card: ApiKnowledgeCardSummary): KnowledgeCardSummary {
+  return {
+    slug: card.slug,
+    title: card.title,
+    type: card.type,
+    definition: card.definition,
+    tags: card.tags,
+    sourceCount: card.source_count,
+    stalenessScore: card.staleness_score,
+    humanEdited: card.human_edited,
+    humanEditedFields: card.human_edited_fields,
+  };
+}
+
+function mapKnowledgeViewModel(view: ApiKnowledgeViewModel): KnowledgeViewModel {
+  return {
+    generatedAt: view.generated_at,
+    stats: view.stats,
+    overview: view.overview,
+    pages: view.pages.map(mapKnowledgeHtmlPage),
+    cards: view.cards.map(mapKnowledgeCardSummary),
+    reviewQueue: view.review_queue.map(mapKnowledgeReviewItem),
+    graph: {
+      nodes: view.graph.nodes.map(mapKnowledgeRelationNode),
+      edges: view.graph.edges,
+    },
   };
 }
 
@@ -428,4 +520,61 @@ export async function listRepoWikiPages(): Promise<RepoWikiPage[]> {
 export async function getRepoWikiPage(slug: string): Promise<RepoWikiPage> {
   const response = await request<ApiRepoWikiPage>(`/api/knowledge/repowiki/pages/${encodeURIComponent(slug)}`);
   return mapRepoWikiPage(response);
+}
+
+export async function getKnowledgeView(): Promise<KnowledgeViewModel> {
+  const response = await request<ApiKnowledgeViewModel>('/api/knowledge/view');
+  return mapKnowledgeViewModel(response);
+}
+
+export async function listKnowledgeViewPages(): Promise<KnowledgeHtmlPage[]> {
+  const response = await request<{ pages: ApiKnowledgeHtmlPage[] }>('/api/knowledge/view/pages');
+  return response.pages.map(mapKnowledgeHtmlPage);
+}
+
+export async function getKnowledgeViewPage(slug: string): Promise<KnowledgeHtmlPage> {
+  const response = await request<ApiKnowledgeHtmlPage>(`/api/knowledge/view/pages/${encodeURIComponent(slug)}`);
+  return mapKnowledgeHtmlPage(response);
+}
+
+export async function listKnowledgeReviewItems(): Promise<KnowledgeReviewItem[]> {
+  const response = await request<{ items: ApiKnowledgeReviewItem[] }>('/api/knowledge/view/review');
+  return response.items.map(mapKnowledgeReviewItem);
+}
+
+export async function confirmKnowledgeReviewItem(itemId: string): Promise<KnowledgeReviewItem> {
+  const response = await request<ApiKnowledgeReviewItem>(`/api/knowledge/view/review/${encodeURIComponent(itemId)}/confirm`, {
+    method: 'POST',
+  });
+  return mapKnowledgeReviewItem(response);
+}
+
+export async function hideKnowledgeReviewItem(itemId: string): Promise<KnowledgeReviewItem> {
+  const response = await request<ApiKnowledgeReviewItem>(`/api/knowledge/view/review/${encodeURIComponent(itemId)}/hide`, {
+    method: 'POST',
+  });
+  return mapKnowledgeReviewItem(response);
+}
+
+export async function rewriteKnowledgeReviewItem(itemId: string, instruction: string): Promise<KnowledgeReviewItem> {
+  const response = await request<ApiKnowledgeReviewItem>(`/api/knowledge/view/review/${encodeURIComponent(itemId)}/rewrite`, {
+    method: 'POST',
+    body: JSON.stringify({ instruction }),
+  });
+  return mapKnowledgeReviewItem(response);
+}
+
+export async function applyKnowledgeReviewItem(itemId: string): Promise<KnowledgeReviewItem> {
+  const response = await request<ApiKnowledgeReviewItem>(`/api/knowledge/view/review/${encodeURIComponent(itemId)}/apply`, {
+    method: 'POST',
+  });
+  return mapKnowledgeReviewItem(response);
+}
+
+export async function pinKnowledgeCardField(slug: string, field: string): Promise<KnowledgeCard> {
+  const response = await request<ApiKnowledgeCard>(`/api/knowledge/view/cards/${encodeURIComponent(slug)}/pin`, {
+    method: 'POST',
+    body: JSON.stringify({ field }),
+  });
+  return mapKnowledgeCard(response);
 }

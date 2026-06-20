@@ -1,10 +1,10 @@
 # Knowledge Engine
 
 * **Status**: Current / Implemented
-* **Implemented From**: `docs/specs/goals/knowledge-engine-v1.goal.md`, `docs/specs/goals/knowledge-engine-v2-core.goal.md`
+* **Implemented From**: `docs/specs/goals/knowledge-engine-v1.goal.md`, `docs/specs/goals/knowledge-engine-v2-core.goal.md`, `docs/specs/goals/knowledge-engine-v3-html-layer.goal.md`
 
 ## 1. Scope
-Knowledge Engine provides the structured Knowledge Card layer and the local v2 Core loop for DeepMemo. It covers YAML Card files, JSON index maintenance, Markdown and conversation compilation, Card-first retrieval, maintenance, watcher-triggered growth, scheduled health updates, backend/frontend Card management, Card-derived RepoWiki pages, commit-diff compilation, `/knowledge` chat commands, and local CLI validation/rebuild workflows.
+Knowledge Engine provides the structured Knowledge Card layer and the local v2/v3 human review loop for DeepMemo. It covers YAML Card files, JSON index maintenance, Markdown and conversation compilation, Card-first retrieval, maintenance, watcher-triggered growth, scheduled health updates, backend/frontend Card management, Card-derived RepoWiki pages, commit-diff compilation, `/knowledge` chat commands, local CLI validation/rebuild workflows, and the React/HTML human Knowledge View for overview, reader, review queue, relation canvas, and rewrite actions.
 
 ## 2. Preserved Behaviors
 * **Local Markdown remains source truth**: Knowledge Cards are compiled artifacts under `data/knowledge/`; they do not replace `data/diary/`, `data/raw/`, or user-authored Markdown.
@@ -20,6 +20,10 @@ Knowledge Engine provides the structured Knowledge Card layer and the local v2 C
 * **Commit-diff flywheel entry point**: `POST /api/knowledge/compile/commit` and `src.knowledge.cli compile-commit` read git commit metadata, changed paths, and commit intent, then create/update commit Cards with `git:{short_hash}` sources while preserving human-edited fields.
 * **Chat knowledge command**: `/knowledge` messages are intercepted before normal QA and can list, show, add, update, or pin Knowledge Cards through the same CardStore path as API/frontend edits.
 * **CLI/CI workflow**: `uv run python -m src.knowledge.cli` supports compile, compile-file, compile-commit, maintain, validate, and repowiki rebuild. `validate` fails on invalid Card YAML, missing source files, or index drift.
+* **HTML human view layer**: `/api/knowledge/view*` exposes a frontend-ready ViewModel containing stats, structured pages, Card summaries, review items, and relation graph data. The frontend `Knowledge` mode renders `Overview`, `Reader`, `Review`, and `Cards` subviews with React/TypeScript instead of raw Markdown-only RepoWiki reading.
+* **Review state**: Human review decisions are stored under `data/knowledge/review-state.json`; this generated metadata does not replace Cards or source Markdown.
+* **Explicit review actions**: Review items can be confirmed, hidden, rewritten, applied, or used to pin Card fields. Rewrite suggestions are deterministic by default and only update Card fields after explicit apply.
+* **Relation canvas**: The HTML view presents Card relationships from `related_cards`, shared tags, and shared sources. It is a Knowledge subview, not a restored Wiki graph.
 
 ## 3. Evidence
 * `src/knowledge/models.py`
@@ -33,18 +37,20 @@ Knowledge Engine provides the structured Knowledge Card layer and the local v2 C
 * `src/knowledge/commit_compiler.py`
 * `src/knowledge/chat_commands.py`
 * `src/knowledge/cli.py`
+* `src/knowledge/view_model.py`
 * `src/routers/knowledge.py`
 * `src/ai/local_search_agent.py`
 * `src/routers/chat.py`
 * `src/app/core/watcher.py`
 * `app/src/App.tsx`
+* `app/src/knowledge/KnowledgeWorkspace.tsx`
 * `tests/unit/test_knowledge_models.py`
 * `tests/unit/test_knowledge_store.py`
 * `tests/unit/test_knowledge_compiler.py`
 * `tests/api/test_knowledge.py`
 
 ## 4. Current Flow
-Markdown compile request or watcher event -> resolve safe Markdown path under `DEEPMEMO_DATA_DIR` -> extract Card drafts using optional LLM or heuristic fallback -> merge with existing Cards while preserving human-edited fields -> write YAML Cards -> rebuild JSON index. Chat flows periodically extract decision/lesson/pattern/concept Cards into `raw/conversations/`, and explicit `/knowledge` commands mutate Cards directly. RepoWiki rebuild reads Cards, groups them by engineering type, and writes deterministic read-only Markdown pages. Commit compile reads git metadata/diff summaries from the repository and writes commit Cards without copying full source files.
+Markdown compile request or watcher event -> resolve safe Markdown path under `DEEPMEMO_DATA_DIR` -> extract Card drafts using optional LLM or heuristic fallback -> merge with existing Cards while preserving human-edited fields -> write YAML Cards -> rebuild JSON index. Chat flows periodically extract decision/lesson/pattern/concept Cards into `raw/conversations/`, and explicit `/knowledge` commands mutate Cards directly. RepoWiki rebuild reads Cards, groups them by engineering type, and writes deterministic read-only Markdown pages. Commit compile reads git metadata/diff summaries from the repository and writes commit Cards without copying full source files. Knowledge ViewModel then aggregates Cards, RepoWiki pages, maintenance output, review-state, and relation edges into React-rendered HTML subviews; human actions update review-state or Card fields through CardStore.
 
 ## 5. Interfaces / Related Files
 * `GET /api/knowledge/cards`
@@ -61,13 +67,22 @@ Markdown compile request or watcher event -> resolve safe Markdown path under `D
 * `POST /api/knowledge/repowiki/rebuild`
 * `GET /api/knowledge/repowiki/pages`
 * `GET /api/knowledge/repowiki/pages/{slug}`
+* `GET /api/knowledge/view`
+* `GET /api/knowledge/view/pages`
+* `GET /api/knowledge/view/pages/{slug}`
+* `GET /api/knowledge/view/review`
+* `POST /api/knowledge/view/review/{item_id}/confirm`
+* `POST /api/knowledge/view/review/{item_id}/hide`
+* `POST /api/knowledge/view/review/{item_id}/rewrite`
+* `POST /api/knowledge/view/review/{item_id}/apply`
+* `POST /api/knowledge/view/cards/{slug}/pin`
 * `uv run python -m src.knowledge.cli compile`
 * `uv run python -m src.knowledge.cli compile-file <path>`
 * `uv run python -m src.knowledge.cli compile-commit <commit>`
 * `uv run python -m src.knowledge.cli maintain`
 * `uv run python -m src.knowledge.cli validate`
 * `uv run python -m src.knowledge.cli repowiki rebuild`
-* Frontend `Knowledge` mode lists, edits, compiles, and maintains Cards, and exposes a read-only RepoWiki subview.
+* Frontend `Knowledge` mode lists, edits, compiles, and maintains Cards, and exposes Overview, Reader, Review, Relation Canvas, and Cards subviews.
 * `/wiki/*` is not a supported public application route.
 
 ## 6. Known Gaps
@@ -76,7 +91,8 @@ Markdown compile request or watcher event -> resolve safe Markdown path under `D
 * Watcher compile uses a configurable debounce timer; startup full reconciliation is not yet implemented.
 * DeepMemo v2 Core is still not a full Qoder-style enterprise knowledge engine. It does not yet provide branch/version conflict arbitration, team knowledge sharing, remote promotion workflows, mandatory vector retrieval, semantic LLM maintenance adjudication, or enterprise governance.
 * Commit-diff compilation is an explicit API/CLI entry point; automatic git hook installation is not enabled by default.
-* RepoWiki is read-only generated Markdown from Cards; human edits should happen on Cards.
+* RepoWiki is generated Markdown from Cards and is now primarily consumed through the structured HTML Reader.
+* Review rewrite is deterministic fallback by default; full LLM rewrite adjudication remains future work.
 * Future work is tracked in `docs/specs/proposed/knowledge-engine-v2-roadmap.md`.
 
 ## 7. Regression Risks
@@ -100,6 +116,7 @@ The implemented v1 is a local, single-repo Knowledge Card engine for DeepMemo. I
 | Frontend knowledge management | Implemented | `Knowledge` mode lists, searches, edits, compiles, and maintains Cards |
 | Legacy Wiki public surface removal | Implemented | `/wiki/*` is unmounted and covered by regression tests |
 | RepoWiki human narrative layer | Implemented locally | `src/knowledge/repowiki.py`, `/api/knowledge/repowiki/*`, frontend read-only RepoWiki subview |
+| HTML human review layer | Implemented locally | `src/knowledge/view_model.py`, `/api/knowledge/view*`, `app/src/knowledge/KnowledgeWorkspace.tsx` |
 | Commit-diff based Card updates | Partially implemented | Explicit API/CLI compile from git commit metadata; no automatic git hook yet |
 | Team/shared knowledge mode | Not implemented | No remote Card sync, permissions, or team namespace exists |
 | Enterprise version arbitration | Not implemented | No repo+branch upload lock or commit-version裁决 exists |
@@ -122,10 +139,12 @@ Current v1 acceptance is defined by:
 * `tests/unit/test_knowledge_repowiki.py`
 * `tests/unit/test_knowledge_commit_compiler.py`
 * `tests/unit/test_knowledge_cli.py`
+* `tests/unit/test_knowledge_view_model.py`
+* `tests/api/test_knowledge_view.py`
 * `uv run python scripts/verify.py --mode quick`
 
 Expected runtime contract:
 
 * `/api/knowledge/*` is the supported knowledge API surface.
 * `/wiki/*` returns 404 from the main app.
-* Frontend build contains `Knowledge` mode with Cards and RepoWiki subviews and no old Wiki mode/API client.
+* Frontend build contains `Knowledge` mode with Overview, Reader, Review, Relation Canvas, and Cards subviews and no old Wiki mode/API client.

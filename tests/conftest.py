@@ -25,6 +25,7 @@ import src.knowledge.commit_compiler as knowledge_commit_compiler
 import src.knowledge.conversation_memory as knowledge_conversation_memory
 import src.knowledge.maintenance as knowledge_maintenance
 import src.knowledge.repowiki as knowledge_repowiki
+import src.knowledge.view_model as knowledge_view_model
 from src.app.database import init_db
 
 
@@ -50,6 +51,7 @@ def isolated_app_state(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setattr(knowledge_conversation_memory, "DATA_DIR", data_dir)
     monkeypatch.setattr(knowledge_maintenance, "DATA_DIR", data_dir)
     monkeypatch.setattr(knowledge_repowiki, "DATA_DIR", data_dir)
+    monkeypatch.setattr(knowledge_view_model, "DATA_DIR", data_dir)
 
     init_db()
     return SimpleNamespace(data_dir=data_dir, db_path=db_path)

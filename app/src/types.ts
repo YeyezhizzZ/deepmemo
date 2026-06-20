@@ -188,6 +188,101 @@ export type RepoWikiPage = {
   path: string;
 };
 
+export type KnowledgeView = 'overview' | 'reader' | 'review' | 'cards';
+
+export type KnowledgeViewStats = KnowledgeHealth['stats'] & {
+  review_open: number;
+  page_count: number;
+  relation_count: number;
+};
+
+export type KnowledgeOverviewSection = {
+  id: string;
+  title: string;
+  value: number;
+  summary: string;
+};
+
+export type KnowledgeHtmlSection = {
+  cardSlug: string;
+  title: string;
+  type: KnowledgeCard['type'];
+  definition: string;
+  keyFacts: string[];
+  sources: EvidenceSource[];
+  relatedCards: string[];
+  tags: string[];
+};
+
+export type KnowledgeHtmlPage = {
+  slug: string;
+  title: string;
+  path: string;
+  summary: string;
+  cardSlugs: string[];
+  sections: KnowledgeHtmlSection[];
+};
+
+export type KnowledgeCardSummary = {
+  slug: string;
+  title: string;
+  type: KnowledgeCard['type'];
+  definition: string;
+  tags: string[];
+  sourceCount: number;
+  stalenessScore: number;
+  humanEdited: boolean;
+  humanEditedFields: string[];
+};
+
+export type KnowledgeReviewItem = {
+  id: string;
+  kind: 'new_card' | 'changed_card' | 'stale_card' | 'conflict' | 'merge_suggestion' | 'repowiki_section';
+  severity: 'high' | 'medium' | 'low';
+  title: string;
+  summary: string;
+  cardSlugs: string[];
+  sourcePaths: string[];
+  suggestedAction: 'confirm' | 'pin' | 'rewrite' | 'merge' | 'hide';
+  status: 'open' | 'confirmed' | 'hidden' | 'rewritten';
+  updatedAt?: string;
+  rewrite?: {
+    field: string;
+    instruction: string;
+    proposedDefinition: string;
+  };
+};
+
+export type KnowledgeRelationNode = {
+  id: string;
+  title: string;
+  type: KnowledgeCard['type'];
+  tags: string[];
+  sourceCount: number;
+  degreeHint: number;
+};
+
+export type KnowledgeRelationEdge = {
+  from: string;
+  to: string;
+  reason: 'related_card' | 'shared_tag' | 'shared_source';
+};
+
+export type KnowledgeRelationGraph = {
+  nodes: KnowledgeRelationNode[];
+  edges: KnowledgeRelationEdge[];
+};
+
+export type KnowledgeViewModel = {
+  generatedAt: string;
+  stats: KnowledgeViewStats;
+  overview: KnowledgeOverviewSection[];
+  pages: KnowledgeHtmlPage[];
+  cards: KnowledgeCardSummary[];
+  reviewQueue: KnowledgeReviewItem[];
+  graph: KnowledgeRelationGraph;
+};
+
 export type ApiKnowledgeCard = {
   id: string;
   slug: string;
@@ -214,6 +309,84 @@ export type ApiRepoWikiPage = {
   content: string;
   card_slugs: string[];
   path: string;
+};
+
+export type ApiKnowledgeHtmlSection = {
+  card_slug: string;
+  title: string;
+  type: KnowledgeCard['type'];
+  definition: string;
+  key_facts: string[];
+  sources: EvidenceSource[];
+  related_cards: string[];
+  tags: string[];
+};
+
+export type ApiKnowledgeHtmlPage = {
+  slug: string;
+  title: string;
+  path: string;
+  summary: string;
+  card_slugs: string[];
+  sections: ApiKnowledgeHtmlSection[];
+};
+
+export type ApiKnowledgeCardSummary = {
+  slug: string;
+  title: string;
+  type: KnowledgeCard['type'];
+  definition: string;
+  tags: string[];
+  source_count: number;
+  staleness_score: number;
+  human_edited: boolean;
+  human_edited_fields: string[];
+};
+
+export type ApiKnowledgeReviewItem = {
+  id: string;
+  kind: KnowledgeReviewItem['kind'];
+  severity: KnowledgeReviewItem['severity'];
+  title: string;
+  summary: string;
+  card_slugs: string[];
+  source_paths: string[];
+  suggested_action: KnowledgeReviewItem['suggestedAction'];
+  status: KnowledgeReviewItem['status'];
+  updated_at?: string | null;
+  rewrite?: {
+    field: string;
+    instruction: string;
+    proposed_definition: string;
+  } | null;
+};
+
+export type ApiKnowledgeRelationNode = {
+  id: string;
+  title: string;
+  type: KnowledgeCard['type'];
+  tags: string[];
+  source_count: number;
+  degree_hint: number;
+};
+
+export type ApiKnowledgeRelationEdge = {
+  from: string;
+  to: string;
+  reason: KnowledgeRelationEdge['reason'];
+};
+
+export type ApiKnowledgeViewModel = {
+  generated_at: string;
+  stats: KnowledgeViewStats;
+  overview: KnowledgeOverviewSection[];
+  pages: ApiKnowledgeHtmlPage[];
+  cards: ApiKnowledgeCardSummary[];
+  review_queue: ApiKnowledgeReviewItem[];
+  graph: {
+    nodes: ApiKnowledgeRelationNode[];
+    edges: ApiKnowledgeRelationEdge[];
+  };
 };
 
 export type ApiFileReference = {

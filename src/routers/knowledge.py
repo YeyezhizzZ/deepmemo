@@ -14,6 +14,7 @@ from src.knowledge.maintenance import KnowledgeMaintainer
 from src.knowledge.models import KnowledgeCard
 from src.knowledge.repowiki import RepoWikiBuilder
 from src.knowledge.retriever import KnowledgeRetriever
+from src.knowledge.view_model import KnowledgeViewService
 
 
 DATA_DIR = Path(os.getenv("DEEPMEMO_DATA_DIR", Path(__file__).resolve().parents[2] / "data"))
@@ -31,6 +32,14 @@ class SearchRequest(BaseModel):
 
 class CompileCommitRequest(BaseModel):
     commit: str = "HEAD"
+
+
+class RewriteRequest(BaseModel):
+    instruction: str = ""
+
+
+class PinCardFieldRequest(BaseModel):
+    field: str
 
 
 def _store() -> CardStore:
@@ -159,6 +168,81 @@ def list_repowiki_pages() -> dict:
 def get_repowiki_page(slug: str) -> dict:
     try:
         return RepoWikiBuilder(DATA_DIR).load_page(slug).to_dict()
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@router.get("/view")
+def get_knowledge_view() -> dict:
+    return KnowledgeViewService(DATA_DIR).build_view()
+
+
+@router.get("/view/pages")
+def list_knowledge_view_pages() -> dict:
+    return {"pages": KnowledgeViewService(DATA_DIR).list_pages()}
+
+
+@router.get("/view/pages/{slug}")
+def get_knowledge_view_page(slug: str) -> dict:
+    try:
+        return KnowledgeViewService(DATA_DIR).get_page(slug)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@router.get("/view/review")
+def list_knowledge_review_items() -> dict:
+    return {"items": KnowledgeViewService(DATA_DIR).review_queue()}
+
+
+@router.post("/view/review/{item_id}/confirm")
+def confirm_knowledge_review_item(item_id: str) -> dict:
+    try:
+        return KnowledgeViewService(DATA_DIR).confirm_review_item(item_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@router.post("/view/review/{item_id}/hide")
+def hide_knowledge_review_item(item_id: str) -> dict:
+    try:
+        return KnowledgeViewService(DATA_DIR).hide_review_item(item_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@router.post("/view/review/{item_id}/rewrite")
+def rewrite_knowledge_review_item(item_id: str, request: RewriteRequest) -> dict:
+    try:
+        return KnowledgeViewService(DATA_DIR).request_rewrite(item_id, instruction=request.instruction)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@router.post("/view/review/{item_id}/apply")
+def apply_knowledge_review_item(item_id: str) -> dict:
+    try:
+        return KnowledgeViewService(DATA_DIR).apply_review_item(item_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@router.post("/view/cards/{slug}/pin")
+def pin_knowledge_card_field(slug: str, request: PinCardFieldRequest) -> dict:
+    try:
+        return KnowledgeViewService(DATA_DIR).pin_card_field(slug, request.field)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except FileNotFoundError as exc:

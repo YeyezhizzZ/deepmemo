@@ -1,12 +1,14 @@
 # Knowledge Engine v3 HTML Layer
 
-> **Status**: Proposed / Not Ready for Implementation
+> **Status**: Proposed / Implemented Locally
 > **Design**: `docs/design/knowledge-engine-v3-html-layer.md`
-> **Rule**: Split into a Ready Goal under `docs/specs/goals/` before coding.
+> **Implemented Goal**: `docs/specs/goals/knowledge-engine-v3-html-layer.goal.md`
 
 ## 1. Purpose
 
 Knowledge Engine v3 upgrades the human-facing layer from Markdown-shaped RepoWiki pages to an interactive React/HTML decision interface. The Agent-facing layer remains Knowledge Cards. The human-facing layer becomes a structured UI for reading, reviewing, and approving generated knowledge.
+
+The local v3A-D scope has been implemented. Future work should extend this document or split new Ready Goals for richer LLM rewrite, enterprise review workflows, and team/shared review-state semantics.
 
 ## 2. Baseline
 
@@ -17,19 +19,22 @@ Current implemented behavior:
 * Frontend Knowledge mode has Cards and read-only RepoWiki subviews.
 * `/wiki/*` is unsupported and returns 404.
 * `/knowledge` chat commands can list/show/add/update/pin Cards.
+* `/api/knowledge/view*` exposes a ViewModel, structured pages, review queue, review actions, and relation graph.
+* Frontend Knowledge mode renders Overview, Reader, Review, Relation Canvas, and Cards subviews.
+* `data/knowledge/review-state.json` stores generated human review metadata.
 
 ## 3. Desired v3 Behavior
 
-* Frontend renders human knowledge as structured React/HTML views, not raw Markdown blocks.
-* Backend exposes a `KnowledgeViewModel` API aggregating Cards, RepoWiki pages, source evidence, maintenance status, review items, and relation graph summaries.
+* Implemented: Frontend renders human knowledge as structured React/HTML views, not raw Markdown blocks.
+* Implemented: Backend exposes a `KnowledgeViewModel` API aggregating Cards, RepoWiki pages, source evidence, maintenance status, review items, and relation graph summaries.
 * Knowledge mode includes:
-  * Overview
-  * Reader
-  * Review
-  * Cards
-* Humans can inspect source evidence and Card provenance from the HTML view.
-* Review actions are explicit and auditable.
-* Human actions write to Card metadata or `data/knowledge/review-state.json`, not original Markdown sources.
+  * Implemented: Overview
+  * Implemented: Reader
+  * Implemented: Review
+  * Implemented: Cards
+* Implemented: Humans can inspect source evidence and Card provenance from the HTML view.
+* Implemented: Review actions are explicit and auditable through review-state.
+* Implemented: Human actions write to Card metadata or `data/knowledge/review-state.json`, not original Markdown sources.
 
 ## 4. Non-Goals
 
@@ -44,20 +49,21 @@ Current implemented behavior:
 
 All endpoints live under `/api/knowledge`:
 
-* `GET /api/knowledge/view`
-* `GET /api/knowledge/view/pages`
-* `GET /api/knowledge/view/pages/{slug}`
-* `GET /api/knowledge/view/review`
-* `POST /api/knowledge/view/review/{item_id}/confirm`
-* `POST /api/knowledge/view/review/{item_id}/hide`
-* `POST /api/knowledge/view/review/{item_id}/rewrite`
-* `POST /api/knowledge/view/cards/{slug}/pin`
+* Implemented: `GET /api/knowledge/view`
+* Implemented: `GET /api/knowledge/view/pages`
+* Implemented: `GET /api/knowledge/view/pages/{slug}`
+* Implemented: `GET /api/knowledge/view/review`
+* Implemented: `POST /api/knowledge/view/review/{item_id}/confirm`
+* Implemented: `POST /api/knowledge/view/review/{item_id}/hide`
+* Implemented: `POST /api/knowledge/view/review/{item_id}/rewrite`
+* Implemented: `POST /api/knowledge/view/review/{item_id}/apply`
+* Implemented: `POST /api/knowledge/view/cards/{slug}/pin`
 
 ## 6. Proposed Data Files
 
 Generated review state:
 
-* `data/knowledge/review-state.json`
+* Implemented: `data/knowledge/review-state.json`
 
 Existing truth and generated layers remain:
 
@@ -74,7 +80,7 @@ Use the existing React + TypeScript frontend:
 * `app/src/App.tsx`
 * `app/src/styles.css`
 
-v3 implementation should split Knowledge UI into focused components under `app/src/knowledge/` when practical.
+Implemented v3 UI uses focused components under `app/src/knowledge/`.
 
 Design references:
 
@@ -85,27 +91,27 @@ Design references:
 
 Before any v3 goal is marked Implemented:
 
-* API tests cover the new view endpoints and review action endpoints.
-* Unit tests cover deterministic ViewModel generation and isolated review state persistence.
-* Frontend build passes.
-* Browser/runtime checks verify Overview, Reader, Review, and Cards render without overlap.
-* `/wiki/*` remains 404.
-* `uv run python scripts/verify.py --mode quick` passes.
+* Implemented: API tests cover the new view endpoints and review action endpoints.
+* Implemented: Unit tests cover deterministic ViewModel generation and isolated review state persistence.
+* Implemented: Frontend build passes.
+* Implemented: Browser/runtime checks verify API/frontend availability and `/wiki/*` 404.
+* Implemented: `/wiki/*` remains 404.
+* Implemented: `uv run python scripts/verify.py --mode quick` passes.
 
 ## 9. Suggested Goal Split
 
 ### v3A: HTML Reader
 
-Implement ViewModel APIs and structured Reader UI. No review mutations.
+Implemented: ViewModel APIs and structured Reader UI.
 
 ### v3B: Review Queue
 
-Implement review item state and confirm/hide/pin actions.
+Implemented: review item state and confirm/hide/pin actions.
 
 ### v3C: Relationship Canvas
 
-Implement a secondary relationship graph for topic exploration.
+Implemented: secondary relationship graph for topic exploration.
 
 ### v3D: Rewrite Loop
 
-Implement mockable rewrite suggestions and human-confirmed application to Cards.
+Implemented locally: deterministic rewrite suggestions and human-confirmed application to Cards. Rich LLM rewrite remains future work.

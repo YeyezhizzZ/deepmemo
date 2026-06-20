@@ -4,7 +4,6 @@ import 'vditor/dist/index.css';
 import {
   AlertCircle,
   AtSign,
-  BookOpen,
   Bot,
   Check,
   ChevronDown,
@@ -42,17 +41,21 @@ import {
   getFileTree,
   getHealth,
   getChatTools,
+  getKnowledgeView,
   getKnowledgeHealth,
-  getRepoWikiPage,
   getMessageCitations,
+  applyKnowledgeReviewItem,
   compileKnowledge,
+  confirmKnowledgeReviewItem,
+  hideKnowledgeReviewItem,
   listKnowledgeCards,
   maintainKnowledge,
-  listRepoWikiPages,
   listMessages,
   listSessions,
   moveFile,
+  pinKnowledgeCardField,
   rebuildRepoWiki,
+  rewriteKnowledgeReviewItem,
   sendMessage,
   sendMessageStream,
   updateFileSyncStatus,
@@ -69,8 +72,10 @@ import type {
   SyncStatus,
   KnowledgeCard,
   KnowledgeHealth,
-  RepoWikiPage,
+  KnowledgeView,
+  KnowledgeViewModel,
 } from './types';
+import { KnowledgeWorkspace as KnowledgeV3Workspace } from './knowledge/KnowledgeWorkspace';
 
 const exampleQuestions = [
   'DeepMemo 的产品想法是什么？',
@@ -79,7 +84,6 @@ const exampleQuestions = [
 ];
 
 type WorkspaceMode = 'editor' | 'qa' | 'knowledge';
-type KnowledgeView = 'cards' | 'repowiki';
 type FileNode = FsNode;
 
 type SourcePanelItem = SourceChunk & {
@@ -1276,234 +1280,6 @@ function HybridWorkspace({
   );
 }
 
-function splitLines(value: string): string[] {
-  return value
-    .split('\n')
-    .map((line) => line.trim())
-    .filter(Boolean);
-}
-
-function KnowledgeWorkspace({
-  cards,
-  activeCard,
-  view,
-  pages,
-  activePage,
-  health,
-  loading,
-  onViewChange,
-  onSelectPage,
-  onRebuildRepoWiki,
-  onSave,
-  onMaintain,
-}: {
-  cards: KnowledgeCard[];
-  activeCard?: KnowledgeCard;
-  view: KnowledgeView;
-  pages: RepoWikiPage[];
-  activePage?: RepoWikiPage;
-  health?: KnowledgeHealth;
-  loading: boolean;
-  onViewChange: (view: KnowledgeView) => void;
-  onSelectPage: (slug: string) => void;
-  onRebuildRepoWiki: () => void;
-  onSave: (slug: string, updates: { title: string; definition: string; keyFacts: string[]; tags: string[]; aliases: string[]; relatedCards: string[] }) => void;
-  onMaintain: () => void;
-}) {
-  const [draft, setDraft] = useState({
-    title: '',
-    definition: '',
-    keyFacts: '',
-    tags: '',
-    aliases: '',
-    relatedCards: '',
-  });
-
-  useEffect(() => {
-    setDraft({
-      title: activeCard?.title ?? '',
-      definition: activeCard?.definition ?? '',
-      keyFacts: activeCard?.keyFacts.join('\n') ?? '',
-      tags: activeCard?.tags.join(', ') ?? '',
-      aliases: activeCard?.aliases.join(', ') ?? '',
-      relatedCards: activeCard?.relatedCards.join(', ') ?? '',
-    });
-  }, [activeCard?.slug]);
-
-  if (view === 'repowiki') {
-    return (
-      <section className="knowledge-workspace">
-        <div className="knowledge-toolbar">
-          <div className="knowledge-tabs" aria-label="Knowledge view">
-            <button type="button" onClick={() => onViewChange('cards')}>
-              <Database size={15} />
-              Cards
-            </button>
-            <button className="knowledge-tabs__button--active" type="button" onClick={() => onViewChange('repowiki')}>
-              <BookOpen size={15} />
-              RepoWiki
-            </button>
-          </div>
-          <button type="button" onClick={onRebuildRepoWiki} disabled={loading}>
-            <RefreshCw size={15} />
-            Rebuild RepoWiki
-          </button>
-        </div>
-
-        <div className="repowiki-layout">
-          <nav className="repowiki-pages" aria-label="RepoWiki pages">
-            {pages.length === 0 ? (
-              <div className="knowledge-list__empty">暂无 RepoWiki 页面</div>
-            ) : pages.map((page) => (
-              <button
-                type="button"
-                key={page.slug}
-                className={page.slug === activePage?.slug ? 'repowiki-page repowiki-page--active' : 'repowiki-page'}
-                onClick={() => onSelectPage(page.slug)}
-                title={page.path}
-              >
-                <BookOpen size={15} />
-                <span>{page.title}</span>
-                <small>{page.cardSlugs.length}</small>
-              </button>
-            ))}
-          </nav>
-          <article className="repowiki-reader">
-            {activePage ? (
-              <>
-                <div className="repowiki-reader__meta">
-                  <span>{activePage.path}</span>
-                  <span>{activePage.cardSlugs.length} source cards</span>
-                </div>
-                <MarkdownLite content={activePage.content} />
-              </>
-            ) : (
-              <div className="knowledge-empty">
-                <BookOpen size={24} />
-                <strong>RepoWiki</strong>
-                <span>从 Knowledge Cards 重建只读项目叙事</span>
-              </div>
-            )}
-          </article>
-        </div>
-      </section>
-    );
-  }
-
-  if (!activeCard) {
-    return (
-      <section className="knowledge-workspace">
-        <div className="knowledge-toolbar">
-          <div className="knowledge-tabs" aria-label="Knowledge view">
-            <button className="knowledge-tabs__button--active" type="button" onClick={() => onViewChange('cards')}>
-              <Database size={15} />
-              Cards
-            </button>
-            <button type="button" onClick={() => onViewChange('repowiki')}>
-              <BookOpen size={15} />
-              RepoWiki
-            </button>
-          </div>
-        </div>
-        <div className="knowledge-empty">
-          <Database size={24} />
-          <strong>Knowledge Cards</strong>
-          <span>{cards.length} cards indexed</span>
-        </div>
-      </section>
-    );
-  }
-
-  return (
-    <section className="knowledge-workspace">
-      <div className="knowledge-toolbar">
-        <div className="knowledge-tabs" aria-label="Knowledge view">
-          <button className="knowledge-tabs__button--active" type="button" onClick={() => onViewChange('cards')}>
-            <Database size={15} />
-            Cards
-          </button>
-          <button type="button" onClick={() => onViewChange('repowiki')}>
-            <BookOpen size={15} />
-            RepoWiki
-          </button>
-        </div>
-        <div className="knowledge-stats">
-          <span>{health?.stats.total_cards ?? cards.length} cards</span>
-          <span>{health?.orphan_cards.length ?? 0} orphan</span>
-          <span>{health?.merge_suggestions?.length ?? 0} merge hints</span>
-        </div>
-        <button type="button" onClick={onMaintain} disabled={loading}>
-          <Wrench size={15} />
-          Maintain
-        </button>
-      </div>
-
-      <div className="knowledge-editor">
-        <label>
-          <span>Title</span>
-          <input value={draft.title} onChange={(event) => setDraft((current) => ({ ...current, title: event.target.value }))} />
-        </label>
-        <label>
-          <span>Definition</span>
-          <textarea value={draft.definition} onChange={(event) => setDraft((current) => ({ ...current, definition: event.target.value }))} rows={4} />
-        </label>
-        <label>
-          <span>Key Facts</span>
-          <textarea value={draft.keyFacts} onChange={(event) => setDraft((current) => ({ ...current, keyFacts: event.target.value }))} rows={6} />
-        </label>
-        <div className="knowledge-editor__grid">
-          <label>
-            <span>Tags</span>
-            <input value={draft.tags} onChange={(event) => setDraft((current) => ({ ...current, tags: event.target.value }))} />
-          </label>
-          <label>
-            <span>Aliases</span>
-            <input value={draft.aliases} onChange={(event) => setDraft((current) => ({ ...current, aliases: event.target.value }))} />
-          </label>
-        </div>
-        <label>
-          <span>Related Cards</span>
-          <input value={draft.relatedCards} onChange={(event) => setDraft((current) => ({ ...current, relatedCards: event.target.value }))} />
-        </label>
-      </div>
-
-      <div className="knowledge-meta">
-        <span>{activeCard.type}</span>
-        <span>updated {activeCard.updatedAt}</span>
-        <span>{activeCard.humanEdited ? `human edited: ${activeCard.humanEditedFields.join(', ')}` : 'auto compiled'}</span>
-      </div>
-
-      <div className="knowledge-sources">
-        {activeCard.sources.map((source) => (
-          <div key={`${source.path}:${source.evidence}`} className="knowledge-source">
-            <strong>{source.path}</strong>
-            <span>{Math.round(source.confidence * 100)}%</span>
-            <p>{source.evidence}</p>
-          </div>
-        ))}
-      </div>
-
-      <div className="knowledge-savebar">
-        <button
-          type="button"
-          onClick={() => onSave(activeCard.slug, {
-            title: draft.title,
-            definition: draft.definition,
-            keyFacts: splitLines(draft.keyFacts),
-            tags: splitLines(draft.tags.replace(/,/g, '\n')),
-            aliases: splitLines(draft.aliases.replace(/,/g, '\n')),
-            relatedCards: splitLines(draft.relatedCards.replace(/,/g, '\n')),
-          })}
-          disabled={loading}
-        >
-          <Check size={15} />
-          Save Card
-        </button>
-      </div>
-    </section>
-  );
-}
-
 function SourcePanel({
   mode,
   activeMessage,
@@ -1914,9 +1690,8 @@ export function App() {
   const [knowledgeQuery, setKnowledgeQuery] = useState('');
   const [knowledgeLoading, setKnowledgeLoading] = useState(false);
   const [activeKnowledgeSlug, setActiveKnowledgeSlug] = useState<string>();
-  const [knowledgeView, setKnowledgeView] = useState<KnowledgeView>('cards');
-  const [repoWikiPages, setRepoWikiPages] = useState<RepoWikiPage[]>([]);
-  const [activeRepoWikiSlug, setActiveRepoWikiSlug] = useState<string>();
+  const [knowledgeView, setKnowledgeView] = useState<KnowledgeView>('overview');
+  const [knowledgeViewModel, setKnowledgeViewModel] = useState<KnowledgeViewModel>();
   const pendingNavigationMessageId = useRef<string>();
 
   const activeFile = useMemo(
@@ -1942,11 +1717,6 @@ export function App() {
     () => knowledgeCards.find((card) => card.slug === activeKnowledgeSlug) ?? knowledgeCards[0],
     [activeKnowledgeSlug, knowledgeCards],
   );
-  const activeRepoWikiPage = useMemo(
-    () => repoWikiPages.find((page) => page.slug === activeRepoWikiSlug) ?? repoWikiPages[0],
-    [activeRepoWikiSlug, repoWikiPages],
-  );
-
   const setActiveEditorValue = (value: string) => {
     if (!activeFileId) return;
     setFileContents((current) => ({ ...current, [activeFileId]: value }));
@@ -2170,15 +1940,12 @@ export function App() {
   const loadKnowledgeCards = async () => {
     setKnowledgeLoading(true);
     try {
-      const [cards, health, pages] = await Promise.all([listKnowledgeCards(), getKnowledgeHealth(), listRepoWikiPages()]);
+      const [cards, health, viewModel] = await Promise.all([listKnowledgeCards(), getKnowledgeHealth(), getKnowledgeView()]);
       setKnowledgeCards(cards);
       setKnowledgeHealth(health);
-      setRepoWikiPages(pages);
+      setKnowledgeViewModel(viewModel);
       if (cards.length > 0 && !cards.some((card) => card.slug === activeKnowledgeSlug)) {
         setActiveKnowledgeSlug(cards[0].slug);
-      }
-      if (pages.length > 0 && !pages.some((page) => page.slug === activeRepoWikiSlug)) {
-        setActiveRepoWikiSlug(pages[0].slug);
       }
       return cards;
     } finally {
@@ -2240,22 +2007,6 @@ export function App() {
     setMode('knowledge');
   };
 
-  const handleSelectRepoWikiPage = async (slug: string) => {
-    setKnowledgeLoading(true);
-    setError(undefined);
-    try {
-      const page = await getRepoWikiPage(slug);
-      setRepoWikiPages((current) => current.map((item) => (item.slug === slug ? page : item)));
-      setActiveRepoWikiSlug(slug);
-      setKnowledgeView('repowiki');
-      setMode('knowledge');
-    } catch (caught) {
-      setError(caught instanceof Error ? caught.message : 'RepoWiki 页面加载失败');
-    } finally {
-      setKnowledgeLoading(false);
-    }
-  };
-
   const handleRefreshKnowledge = async () => {
     setRefreshing(true);
     setError(undefined);
@@ -2289,14 +2040,76 @@ export function App() {
     setError(undefined);
     try {
       await rebuildRepoWiki();
-      const pages = await listRepoWikiPages();
-      setRepoWikiPages(pages);
-      if (pages.length > 0 && !pages.some((page) => page.slug === activeRepoWikiSlug)) {
-        setActiveRepoWikiSlug(pages[0].slug);
-      }
-      setKnowledgeView('repowiki');
+      await loadKnowledgeCards();
+      setKnowledgeView('reader');
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : 'RepoWiki 重建失败');
+    } finally {
+      setKnowledgeLoading(false);
+    }
+  };
+
+  const handleConfirmKnowledgeReview = async (itemId: string) => {
+    setKnowledgeLoading(true);
+    setError(undefined);
+    try {
+      await confirmKnowledgeReviewItem(itemId);
+      await loadKnowledgeCards();
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : 'Review 确认失败');
+    } finally {
+      setKnowledgeLoading(false);
+    }
+  };
+
+  const handleHideKnowledgeReview = async (itemId: string) => {
+    setKnowledgeLoading(true);
+    setError(undefined);
+    try {
+      await hideKnowledgeReviewItem(itemId);
+      await loadKnowledgeCards();
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : 'Review 隐藏失败');
+    } finally {
+      setKnowledgeLoading(false);
+    }
+  };
+
+  const handleRewriteKnowledgeReview = async (itemId: string, instruction: string) => {
+    setKnowledgeLoading(true);
+    setError(undefined);
+    try {
+      await rewriteKnowledgeReviewItem(itemId, instruction);
+      await loadKnowledgeCards();
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : 'Review 重写失败');
+    } finally {
+      setKnowledgeLoading(false);
+    }
+  };
+
+  const handleApplyKnowledgeReview = async (itemId: string) => {
+    setKnowledgeLoading(true);
+    setError(undefined);
+    try {
+      await applyKnowledgeReviewItem(itemId);
+      await loadKnowledgeCards();
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : 'Review 应用失败');
+    } finally {
+      setKnowledgeLoading(false);
+    }
+  };
+
+  const handlePinKnowledgeCardField = async (slug: string, field: string) => {
+    setKnowledgeLoading(true);
+    setError(undefined);
+    try {
+      const saved = await pinKnowledgeCardField(slug, field);
+      setKnowledgeCards((current) => current.map((card) => (card.slug === slug ? saved : card)));
+      await loadKnowledgeCards();
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : 'Card 字段固定失败');
     } finally {
       setKnowledgeLoading(false);
     }
@@ -2713,19 +2526,23 @@ export function App() {
           </div>
         )}
         {mode === 'knowledge' ? (
-          <KnowledgeWorkspace
+          <KnowledgeV3Workspace
             cards={knowledgeCards}
             activeCard={activeKnowledgeCard}
+            viewModel={knowledgeViewModel}
             view={knowledgeView}
-            pages={repoWikiPages}
-            activePage={activeRepoWikiPage}
             health={knowledgeHealth}
             loading={knowledgeLoading || refreshing}
             onViewChange={setKnowledgeView}
-            onSelectPage={handleSelectRepoWikiPage}
-            onRebuildRepoWiki={handleRebuildRepoWiki}
+            onSelectCard={handleSelectKnowledgeCard}
+            onRefresh={handleRebuildRepoWiki}
             onSave={handleSaveKnowledgeCard}
             onMaintain={handleMaintainKnowledge}
+            onConfirmReview={handleConfirmKnowledgeReview}
+            onHideReview={handleHideKnowledgeReview}
+            onRewriteReview={handleRewriteKnowledgeReview}
+            onApplyReview={handleApplyKnowledgeReview}
+            onPinCardField={handlePinKnowledgeCardField}
           />
         ) : (
           <HybridWorkspace
