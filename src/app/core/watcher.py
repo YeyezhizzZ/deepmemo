@@ -1,6 +1,7 @@
 import os
 import hashlib
 import threading
+from threading import Timer
 from pathlib import Path
 from datetime import datetime
 from watchdog.observers import Observer
@@ -8,6 +9,38 @@ from watchdog.observers.polling import PollingObserver
 from watchdog.events import FileSystemEventHandler
 
 DATA_DIR = Path(os.getenv("DEEPMEMO_DATA_DIR", Path(__file__).resolve().parents[2].parent / "data"))
+KNOWLEDGE_DEBOUNCE_SECONDS = int(os.getenv("DEEPMEMO_KNOWLEDGE_DEBOUNCE_SECONDS", "300"))
+_pending_compile_timers: dict[str, Timer] = {}
+
+
+def is_knowledge_source(rel_path: str) -> bool:
+    normalized = rel_path.replace("\\", "/")
+    return normalized.endswith(".md") and (normalized.startswith("diary/") or normalized.startswith("raw/"))
+
+
+def compile_knowledge_source(rel_path: str) -> None:
+    if not is_knowledge_source(rel_path):
+        return
+    try:
+        from src.knowledge.card_compiler import KnowledgeCardCompiler
+
+        KnowledgeCardCompiler(data_dir=DATA_DIR).compile_file(rel_path)
+        print(f"[Watcher] knowledge compiled: {rel_path}", flush=True)
+    except Exception as exc:
+        print(f"[Watcher] knowledge compile failed for {rel_path}: {exc}", flush=True)
+
+
+def schedule_knowledge_compile(rel_path: str, delay_seconds: int | None = None) -> None:
+    if not is_knowledge_source(rel_path):
+        return
+    delay = KNOWLEDGE_DEBOUNCE_SECONDS if delay_seconds is None else delay_seconds
+    existing = _pending_compile_timers.pop(rel_path, None)
+    if existing:
+        existing.cancel()
+    timer = Timer(delay, compile_knowledge_source, args=(rel_path,))
+    timer.daemon = True
+    _pending_compile_timers[rel_path] = timer
+    timer.start()
 
 def calculate_hash(file_path: Path) -> str:
     """计算文件的 MD5 hash"""
@@ -66,6 +99,7 @@ class KnowledgeBaseHandler(FileSystemEventHandler):
                 print(f"[Watcher] {event_type}: {rel_path} -> dirty (hash changed)")
                 if self.on_change_callback:
                     self.on_change_callback(rel_path, "dirty")
+                schedule_knowledge_compile(rel_path)
         conn.close()
 
 class WatcherService:

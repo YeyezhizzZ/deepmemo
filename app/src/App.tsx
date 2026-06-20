@@ -22,7 +22,6 @@ import {
   MessageSquare,
   MessageSquarePlus,
   MoreHorizontal,
-  Network,
   RefreshCw,
   Send,
   Sparkles,
@@ -42,15 +41,18 @@ import {
   getFileTree,
   getHealth,
   getChatTools,
+  getKnowledgeHealth,
   getMessageCitations,
-  getWikiGraph,
-  rebuildWiki,
+  compileKnowledge,
+  listKnowledgeCards,
+  maintainKnowledge,
   listMessages,
   listSessions,
   moveFile,
   sendMessage,
   sendMessageStream,
   updateFileSyncStatus,
+  updateKnowledgeCard,
   writeFile,
 } from './api';
 import type {
@@ -61,9 +63,8 @@ import type {
   FsNode,
   Session,
   SyncStatus,
-  WikiGraph,
-  WikiGraphNode,
-  WikiCommunity,
+  KnowledgeCard,
+  KnowledgeHealth,
 } from './types';
 
 const exampleQuestions = [
@@ -72,7 +73,7 @@ const exampleQuestions = [
   '我关于 LLM-Spine 记录了哪些想法？',
 ];
 
-type WorkspaceMode = 'editor' | 'qa' | 'wiki';
+type WorkspaceMode = 'editor' | 'qa' | 'knowledge';
 type FileNode = FsNode;
 
 type SourcePanelItem = SourceChunk & {
@@ -183,95 +184,6 @@ function countNodes(nodes: FileNode[]): { files: number; folders: number } {
   );
 }
 
-function formatWikiType(type: string): string {
-  const map: Record<string, string> = {
-    source: 'Source',
-    entity: 'Entity',
-    concept: 'Concept',
-    synthesis: 'Synthesis',
-    query: 'Query',
-  };
-  return map[type] ?? type;
-}
-
-type WikiNodeLayout = {
-  path: string;
-  x: number;
-  y: number;
-  size: number;
-};
-
-function normalizeWikiPath(path: string): string {
-  return path.replace(/^data\//, '').replace(/^\/+/, '').trim();
-}
-
-function buildWikiGraph(graph: WikiGraph): WikiGraph {
-  return graph;
-}
-
-function getCommunityNodes(graph: WikiGraph, communityId?: string): WikiGraphNode[] {
-  if (!communityId) return [];
-  return graph.nodes
-    .filter((node) => node.communityId === communityId)
-    .sort((a, b) => {
-      const byDegree = b.degree - a.degree;
-      if (byDegree !== 0) return byDegree;
-      return a.title.localeCompare(b.title, 'zh-Hans-CN');
-    });
-}
-
-function layoutCommunityNodes(nodes: WikiGraphNode[], selectedPath?: string): WikiNodeLayout[] {
-  if (nodes.length === 0) return [];
-  const ordered = [...nodes].sort((a, b) => {
-    if (a.path === selectedPath) return -1;
-    if (b.path === selectedPath) return 1;
-    const byDegree = b.degree - a.degree;
-    if (byDegree !== 0) return byDegree;
-    return a.title.localeCompare(b.title, 'zh-Hans-CN');
-  });
-  const center = ordered.find((node) => node.path === selectedPath) ?? ordered[0];
-  const others = ordered.filter((node) => node.path !== center.path);
-  const layouts: WikiNodeLayout[] = [
-    { path: center.path, x: 50, y: 50, size: 22 },
-  ];
-  const rings = [
-    { radius: 22, count: Math.min(others.length, 6) },
-    { radius: 38, count: Math.min(Math.max(others.length - 6, 0), 10) },
-    { radius: 52, count: Math.max(others.length - 16, 0) },
-  ];
-  let offset = 0;
-  for (const ring of rings) {
-    const slice = others.slice(offset, offset + ring.count);
-    if (slice.length > 0) {
-      slice.forEach((node, index) => {
-        const angle = (Math.PI * 2 * index) / slice.length - Math.PI / 2;
-        const size = node.degree >= 4 ? 16 : node.degree >= 2 ? 14 : 12;
-        layouts.push({
-          path: node.path,
-          x: 50 + Math.cos(angle) * ring.radius,
-          y: 50 + Math.sin(angle) * ring.radius,
-          size,
-        });
-      });
-    }
-    offset += ring.count;
-  }
-  return layouts;
-}
-
-function getSelectedCommunity(graph: WikiGraph, activeCommunityId?: string, activePath?: string): WikiCommunity | undefined {
-  return (
-    graph.communities.find((community) => community.id === activeCommunityId)
-    ?? graph.communities.find((community) => community.nodePaths.includes(activePath ?? ''))
-    ?? graph.communities[0]
-  );
-}
-
-function getCommunityForNode(graph: WikiGraph, nodePath?: string): WikiCommunity | undefined {
-  if (!nodePath) return undefined;
-  return graph.communities.find((community) => community.nodePaths.includes(nodePath));
-}
-
 function findFirstFile(nodes: FileNode[]): FileNode | undefined {
   const allFiles = collectFiles(nodes);
   return allFiles.find((node) => node.path === 'ideas/DeepMemo.md')
@@ -296,8 +208,8 @@ function deriveEntityOptions(nodes: FileNode[], content: string): string[] {
     .filter((node) => node.path.startsWith('memory/') || node.path.startsWith('ideas/'))
     .map((node) => node.name.replace(/\.md$/i, '').trim())
     .filter(Boolean);
-  const wikiLinks = Array.from(content.matchAll(/\[\[([^\]]+)\]\]/g), (match) => match[1].trim());
-  return Array.from(new Set([...wikiLinks, ...fileNames])).slice(0, 12);
+  const bracketLinks = Array.from(content.matchAll(/\[\[([^\]]+)\]\]/g), (match) => match[1].trim());
+  return Array.from(new Set([...bracketLinks, ...fileNames])).slice(0, 12);
 }
 
 function formatEditorMarkdown(value: string): string {
@@ -464,11 +376,10 @@ function ModeSidebar({
   sessions,
   activeFileId,
   activeSessionId,
-  wikiGraph,
-  activeWikiNodeId,
-  activeWikiCommunityId,
+  knowledgeCards,
+  activeKnowledgeSlug,
   expanded,
-  wikiQuery,
+  knowledgeQuery,
   refreshing,
   creating,
   onSelectFile,
@@ -480,21 +391,19 @@ function ModeSidebar({
   onSelectSession,
   onCreateSession,
   onDeleteSession,
-  onSelectWikiNode,
-  onSelectWikiCommunity,
-  onChangeWikiQuery,
-  onRefreshWiki,
+  onSelectKnowledgeCard,
+  onChangeKnowledgeQuery,
+  onRefreshKnowledge,
 }: {
   mode: WorkspaceMode;
   files: FileNode[];
   sessions: Session[];
   activeFileId?: string;
   activeSessionId?: string;
-  wikiGraph: WikiGraph;
-  activeWikiNodeId?: string;
-  activeWikiCommunityId?: string;
+  knowledgeCards: KnowledgeCard[];
+  activeKnowledgeSlug?: string;
   expanded: Set<string>;
-  wikiQuery: string;
+  knowledgeQuery: string;
   refreshing: boolean;
   creating: boolean;
   onSelectFile: (id: string) => void;
@@ -506,80 +415,24 @@ function ModeSidebar({
   onSelectSession: (id: string) => void;
   onCreateSession: () => void;
   onDeleteSession: (id: string) => void;
-  onSelectWikiNode: (path: string) => void;
-  onSelectWikiCommunity: (communityId: string) => void;
-  onChangeWikiQuery: (value: string) => void;
-  onRefreshWiki: () => void;
+  onSelectKnowledgeCard: (slug: string) => void;
+  onChangeKnowledgeQuery: (value: string) => void;
+  onRefreshKnowledge: () => void;
 }) {
   const counts = useMemo(() => countNodes(files), [files]);
   const sortedSessions = useMemo(() => sortSessionsByUpdatedAt(sessions), [sessions]);
-  const filteredCommunities = useMemo(() => {
-    const query = wikiQuery.trim().toLowerCase();
-    return wikiGraph.communities.filter((community) => {
-      if (!query) return true;
-      const nodeTitles = community.nodePaths
-        .map((path) => wikiGraph.nodeMap.get(path)?.title ?? '')
-        .join(' ')
-        .toLowerCase();
-      const haystack = [
-        community.title,
-        community.summary,
-        community.updatedAt,
-        ...community.topTags,
-        nodeTitles,
-      ]
-        .join(' ')
-        .toLowerCase();
-      return haystack.includes(query);
-    });
-  }, [wikiGraph, wikiQuery]);
-
-  // 按类型分组的wiki页面列表
-  const wikiNodesByType = useMemo(() => {
-    const query = wikiQuery.trim().toLowerCase();
-    const nodes = Array.from(wikiGraph.nodeMap.values());
-    const filtered = query
-      ? nodes.filter((node) => {
-          const haystack = [node.title, node.type, ...node.tags].join(' ').toLowerCase();
-          return haystack.includes(query);
-        })
-      : nodes;
-
-    const groups: Record<string, typeof filtered> = {};
-    for (const node of filtered) {
-      const type = node.type || 'other';
-      if (!groups[type]) groups[type] = [];
-      groups[type].push(node);
-    }
-    // 每组按title排序
-    for (const type of Object.keys(groups)) {
-      groups[type].sort((a, b) => a.title.localeCompare(b.title, 'zh-Hans-CN'));
-    }
-    return groups;
-  }, [wikiGraph, wikiQuery]);
-
-  const typeOrder = ['entity', 'concept', 'synthesis', 'source', 'query'];
-  const typeLabels: Record<string, string> = {
-    entity: '实体',
-    concept: '概念',
-    synthesis: '综合',
-    source: '来源',
-    query: '问答',
-  };
-
-  // 展开/折叠状态管理
-  const [expandedTypes, setExpandedTypes] = useState<Set<string>>(new Set(['entity', 'concept']));
-  const toggleTypeExpanded = (type: string) => {
-    setExpandedTypes((prev) => {
-      const next = new Set(prev);
-      if (next.has(type)) {
-        next.delete(type);
-      } else {
-        next.add(type);
-      }
-      return next;
-    });
-  };
+  const filteredKnowledgeCards = useMemo(() => {
+    const query = knowledgeQuery.trim().toLowerCase();
+    return knowledgeCards
+      .filter((card) => {
+        if (!query) return true;
+        return [card.title, card.slug, card.type, card.definition, ...card.tags, ...card.aliases]
+          .join(' ')
+          .toLowerCase()
+          .includes(query);
+      })
+      .sort((a, b) => a.title.localeCompare(b.title, 'zh-Hans-CN'));
+  }, [knowledgeCards, knowledgeQuery]);
 
   return (
     <aside className="data-explorer">
@@ -676,68 +529,46 @@ function ModeSidebar({
             })}
           </nav>
         </div>
-      ) : (
+      ) : mode === 'knowledge' ? (
         <>
-          <div className="explorer-toolbar explorer-toolbar--wiki" aria-label="Wiki 操作">
-            <button type="button" title="重建 Wiki（从 diary 重新编译）" onClick={onRefreshWiki} disabled={refreshing}>
+          <div className="explorer-toolbar explorer-toolbar--knowledge" aria-label="Knowledge 操作">
+            <button type="button" title="编译 Knowledge Cards" onClick={onRefreshKnowledge} disabled={refreshing}>
               <RefreshCw size={16} className={refreshing ? 'spin' : ''} />
-              <span>{refreshing ? '重建中' : '重建 Wiki'}</span>
+              <span>{refreshing ? '编译中' : '编译 Card'}</span>
             </button>
           </div>
 
-          <div className="wiki-filters">
-            <div className="search-box search-box--wiki">
+          <div className="knowledge-filters">
+            <div className="search-box search-box--knowledge">
               <Database size={14} />
               <input
-                value={wikiQuery}
-                onChange={(event) => onChangeWikiQuery(event.target.value)}
-                placeholder="搜索 Wiki 页面"
-                aria-label="搜索 Wiki 页面"
+                value={knowledgeQuery}
+                onChange={(event) => onChangeKnowledgeQuery(event.target.value)}
+                placeholder="搜索 Knowledge Card"
+                aria-label="搜索 Knowledge Card"
               />
             </div>
           </div>
 
-          <nav className="wiki-list" aria-label="Wiki 页面列表">
-            {typeOrder.map((type) => {
-              const isExpanded = expandedTypes.has(type);
-              const nodes = wikiNodesByType[type] ?? [];
-              return (
-                <div key={type} className="wiki-type-group">
-                  <button
-                    type="button"
-                    className="wiki-type-group__header"
-                    onClick={() => toggleTypeExpanded(type)}
-                  >
-                    <span className="wiki-type-group__chevron">
-                      {isExpanded ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
-                    </span>
-                    <span className="wiki-type-group__label">{typeLabels[type] ?? type}</span>
-                    <span className="wiki-type-group__count">{nodes.length}</span>
-                  </button>
-                  {isExpanded && nodes.length === 0 && (
-                    <div className="wiki-type-group__empty">暂无内容</div>
-                  )}
-                  {isExpanded && nodes.map((node) => {
-                    const isActive = node.path === activeWikiNodeId;
-                    return (
-                    <button
-                      type="button"
-                      key={node.path}
-                      className={isActive ? 'wiki-item wiki-item--active' : 'wiki-item'}
-                      onClick={() => onSelectWikiNode(node.path)}
-                      title={node.title}
-                      data-testid={`wiki-node:${node.path}`}
-                    >
-                        <span className={`wiki-item__badge wiki-item__badge--${node.type}`}>{typeLabels[node.type] ?? node.type}</span>
-                        <span className="wiki-item__title">{node.title}</span>
-                      </button>
-                    );
-                  })}
-                </div>
-              );
-            })}
+          <nav className="knowledge-list" aria-label="Knowledge Card 列表">
+            {filteredKnowledgeCards.length === 0 ? (
+              <div className="knowledge-list__empty">暂无 Card</div>
+            ) : filteredKnowledgeCards.map((card) => (
+              <button
+                type="button"
+                key={card.slug}
+                className={card.slug === activeKnowledgeSlug ? 'knowledge-item knowledge-item--active' : 'knowledge-item'}
+                onClick={() => onSelectKnowledgeCard(card.slug)}
+                title={card.title}
+              >
+                <span className={`knowledge-item__badge knowledge-item__badge--${card.type}`}>{card.type}</span>
+                <span className="knowledge-item__title">{card.title}</span>
+              </button>
+            ))}
           </nav>
         </>
+      ) : (
+        null
       )}
     </aside>
   );
@@ -829,8 +660,7 @@ function FileTreeNode({
 function WorkspaceHeader({
   activeFile,
   activeSession,
-  activeWikiCommunity,
-  activeWikiNode,
+  activeKnowledgeCard,
   mode,
   saving,
   onModeChange,
@@ -839,12 +669,11 @@ function WorkspaceHeader({
   onFormat,
   onCreateSession,
   onRefresh,
-  onRefreshWiki,
+  onRefreshKnowledge,
 }: {
   activeFile?: FileNode;
   activeSession?: Session;
-  activeWikiCommunity?: WikiCommunity;
-  activeWikiNode?: WikiGraphNode;
+  activeKnowledgeCard?: KnowledgeCard;
   mode: WorkspaceMode;
   saving: boolean;
   onModeChange: (mode: WorkspaceMode) => void;
@@ -853,15 +682,13 @@ function WorkspaceHeader({
   onFormat: () => void;
   onCreateSession: () => void;
   onRefresh: () => void;
-  onRefreshWiki: () => void;
+  onRefreshKnowledge: () => void;
 }) {
   const pathLabel =
-    mode === 'wiki'
-      ? activeWikiCommunity
-        ? activeWikiNode
-          ? `${activeWikiCommunity.title} · ${activeWikiNode.title}`
-          : activeWikiCommunity.title
-        : 'wiki/'
+    mode === 'knowledge'
+      ? activeKnowledgeCard
+        ? `knowledge/${activeKnowledgeCard.slug}.yaml`
+        : 'knowledge/cards'
       : mode === 'qa'
         ? activeSession?.sessionName ?? '会话'
         : activeFile
@@ -893,12 +720,12 @@ function WorkspaceHeader({
           问答模式
         </button>
         <button
-          className={mode === 'wiki' ? 'mode-switch__button mode-switch__button--active' : 'mode-switch__button'}
+          className={mode === 'knowledge' ? 'mode-switch__button mode-switch__button--active' : 'mode-switch__button'}
           type="button"
-          onClick={() => onModeChange('wiki')}
+          onClick={() => onModeChange('knowledge')}
         >
-          <Network size={15} />
-          Wiki
+          <Database size={15} />
+          Knowledge
         </button>
       </div>
 
@@ -919,10 +746,10 @@ function WorkspaceHeader({
             </button>
           </>
         )}
-        {mode === 'wiki' && (
-          <button type="button" onClick={onRefreshWiki}>
+        {mode === 'knowledge' && (
+          <button type="button" onClick={onRefreshKnowledge}>
             <RefreshCw size={15} />
-            重建 Wiki
+            编译 Card
           </button>
         )}
       </div>
@@ -1005,7 +832,7 @@ function EditorContent({
               今日日记模板
             </button>
             <button type="button" onClick={() => onSlashCommand('extract')}>
-              <Network size={14} />
+              <Database size={14} />
               抽取实体关系
             </button>
             <button type="button" onClick={() => onSlashCommand('polish')}>
@@ -1443,139 +1270,135 @@ function HybridWorkspace({
   );
 }
 
-function WikiWorkspace({
-  graph,
-  activeCommunity,
-  activeNode,
+function splitLines(value: string): string[] {
+  return value
+    .split('\n')
+    .map((line) => line.trim())
+    .filter(Boolean);
+}
+
+function KnowledgeWorkspace({
+  cards,
+  activeCard,
+  health,
   loading,
-  error,
-  onSelectCommunity,
-  onSelectNode,
-  onOpenSourceFile,
-  onRefresh,
+  onSave,
+  onMaintain,
 }: {
-  graph: WikiGraph;
-  activeCommunity?: WikiCommunity;
-  activeNode?: WikiGraphNode;
+  cards: KnowledgeCard[];
+  activeCard?: KnowledgeCard;
+  health?: KnowledgeHealth;
   loading: boolean;
-  error?: string;
-  onSelectCommunity: (communityId: string) => void;
-  onSelectNode: (path: string) => void;
-  onOpenSourceFile: (path: string) => void;
-  onRefresh: () => void;
+  onSave: (slug: string, updates: { title: string; definition: string; keyFacts: string[]; tags: string[]; aliases: string[]; relatedCards: string[] }) => void;
+  onMaintain: () => void;
 }) {
-  const communityNodes = useMemo(() => getCommunityNodes(graph, activeCommunity?.id), [graph, activeCommunity?.id]);
-  const layouts = useMemo(() => layoutCommunityNodes(communityNodes, activeNode?.path), [communityNodes, activeNode?.path]);
-  const layoutMap = useMemo(() => new Map(layouts.map((layout) => [layout.path, layout])), [layouts]);
-  const selectedPath = activeNode?.path ?? activeCommunity?.hubPath;
-  const visibleEdges = useMemo(() => {
-    const paths = new Set(communityNodes.map((node) => node.path));
-    return graph.edges.filter((edge) => paths.has(edge.from) && paths.has(edge.to));
-  }, [communityNodes, graph.edges]);
-  const selectedNeighbors = useMemo(() => {
-    if (!activeNode) return [];
-    return activeNode.neighbors
-      .map((path) => graph.nodeMap.get(path))
-      .filter((node): node is WikiGraphNode => Boolean(node))
-      .sort((a, b) => b.degree - a.degree || a.title.localeCompare(b.title, 'zh-Hans-CN'));
-  }, [activeNode, graph.nodeMap]);
+  const [draft, setDraft] = useState({
+    title: '',
+    definition: '',
+    keyFacts: '',
+    tags: '',
+    aliases: '',
+    relatedCards: '',
+  });
+
+  useEffect(() => {
+    setDraft({
+      title: activeCard?.title ?? '',
+      definition: activeCard?.definition ?? '',
+      keyFacts: activeCard?.keyFacts.join('\n') ?? '',
+      tags: activeCard?.tags.join(', ') ?? '',
+      aliases: activeCard?.aliases.join(', ') ?? '',
+      relatedCards: activeCard?.relatedCards.join(', ') ?? '',
+    });
+  }, [activeCard?.slug]);
+
+  if (!activeCard) {
+    return (
+      <section className="knowledge-workspace">
+        <div className="knowledge-empty">
+          <Database size={24} />
+          <strong>Knowledge Cards</strong>
+          <span>{cards.length} cards indexed</span>
+        </div>
+      </section>
+    );
+  }
 
   return (
-    <section className="hybrid-workspace hybrid-workspace--wiki">
-      <div className="workspace-body workspace-body--wiki">
-        <div className="wiki-graph-workspace">
-          {error && <div className="inline-warning">{error}</div>}
-
-          {!activeCommunity ? (
-            <div className="empty-panel empty-panel--wiki">
-              <Network size={18} />
-              <span>{loading ? '加载社区中...' : '在左侧选择一个知识社区'}</span>
-            </div>
-          ) : (
-            <div className="wiki-graph-card">
-              <div className="wiki-graph-card__meta">
-                <div>
-                  <div className="wiki-graph-card__eyebrow">
-                    <span className="wiki-item__badge wiki-item__badge--community">Community</span>
-                    <span className="wiki-status wiki-status--active">{activeCommunity.nodeCount} nodes</span>
-                  </div>
-                  <h1>{activeCommunity.title}</h1>
-                  <p>{activeCommunity.summary}</p>
-                </div>
-                <div className="wiki-graph-card__chips">
-                  {activeCommunity.topTags.map((tag) => (
-                    <span className="wiki-chip" key={tag}>{tag}</span>
-                  ))}
-                </div>
-              </div>
-
-              <div className="wiki-graph-canvas">
-                <svg className="wiki-graph-canvas__edges" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true">
-                  {visibleEdges.map((edge) => {
-                    const from = layoutMap.get(edge.from);
-                    const to = layoutMap.get(edge.to);
-                    if (!from || !to) return null;
-                    return (
-                      <line
-                        key={`${edge.from}-${edge.to}`}
-                        x1={from.x}
-                        y1={from.y}
-                        x2={to.x}
-                        y2={to.y}
-                      />
-                    );
-                  })}
-                </svg>
-
-                {layouts.map((layout) => {
-                  const node = graph.nodeMap.get(layout.path);
-                  if (!node) return null;
-                  const isSelected = layout.path === selectedPath;
-                  const isHub = layout.path === activeCommunity.hubPath;
-                  const isNeighbor = activeNode?.neighbors.includes(layout.path) ?? false;
-                  return (
-                    <button
-                      key={layout.path}
-                      type="button"
-                      className={[
-                        'wiki-graph-node',
-                        `wiki-graph-node--${node.type}`,
-                        isSelected ? 'wiki-graph-node--selected' : '',
-                        isHub ? 'wiki-graph-node--hub' : '',
-                        isNeighbor ? 'wiki-graph-node--neighbor' : '',
-                      ].join(' ')}
-                      style={{
-                        left: `${layout.x}%`,
-                        top: `${layout.y}%`,
-                        width: `${layout.size + 18}px`,
-                        height: `${layout.size + 18}px`,
-                      }}
-                      title={node.title}
-                      onClick={() => onSelectNode(node.path)}
-                    >
-                      <span>{node.title}</span>
-                    </button>
-                  );
-                })}
-              </div>
-
-              <div className="wiki-graph-footer">
-                <div>
-                  <strong>Hub</strong>
-                  <span>{graph.nodeMap.get(activeCommunity.hubPath)?.title ?? 'Unknown'}</span>
-                </div>
-                <div>
-                  <strong>Edges</strong>
-                  <span>{activeCommunity.edgeCount}</span>
-                </div>
-                <div>
-                  <strong>Updated</strong>
-                  <span>{activeCommunity.updatedAt || '未更新'}</span>
-                </div>
-              </div>
-            </div>
-          )}
+    <section className="knowledge-workspace">
+      <div className="knowledge-toolbar">
+        <div className="knowledge-stats">
+          <span>{health?.stats.total_cards ?? cards.length} cards</span>
+          <span>{health?.orphan_cards.length ?? 0} orphan</span>
+          <span>{health?.merge_suggestions?.length ?? 0} merge hints</span>
         </div>
+        <button type="button" onClick={onMaintain} disabled={loading}>
+          <Wrench size={15} />
+          Maintain
+        </button>
+      </div>
+
+      <div className="knowledge-editor">
+        <label>
+          <span>Title</span>
+          <input value={draft.title} onChange={(event) => setDraft((current) => ({ ...current, title: event.target.value }))} />
+        </label>
+        <label>
+          <span>Definition</span>
+          <textarea value={draft.definition} onChange={(event) => setDraft((current) => ({ ...current, definition: event.target.value }))} rows={4} />
+        </label>
+        <label>
+          <span>Key Facts</span>
+          <textarea value={draft.keyFacts} onChange={(event) => setDraft((current) => ({ ...current, keyFacts: event.target.value }))} rows={6} />
+        </label>
+        <div className="knowledge-editor__grid">
+          <label>
+            <span>Tags</span>
+            <input value={draft.tags} onChange={(event) => setDraft((current) => ({ ...current, tags: event.target.value }))} />
+          </label>
+          <label>
+            <span>Aliases</span>
+            <input value={draft.aliases} onChange={(event) => setDraft((current) => ({ ...current, aliases: event.target.value }))} />
+          </label>
+        </div>
+        <label>
+          <span>Related Cards</span>
+          <input value={draft.relatedCards} onChange={(event) => setDraft((current) => ({ ...current, relatedCards: event.target.value }))} />
+        </label>
+      </div>
+
+      <div className="knowledge-meta">
+        <span>{activeCard.type}</span>
+        <span>updated {activeCard.updatedAt}</span>
+        <span>{activeCard.humanEdited ? `human edited: ${activeCard.humanEditedFields.join(', ')}` : 'auto compiled'}</span>
+      </div>
+
+      <div className="knowledge-sources">
+        {activeCard.sources.map((source) => (
+          <div key={`${source.path}:${source.evidence}`} className="knowledge-source">
+            <strong>{source.path}</strong>
+            <span>{Math.round(source.confidence * 100)}%</span>
+            <p>{source.evidence}</p>
+          </div>
+        ))}
+      </div>
+
+      <div className="knowledge-savebar">
+        <button
+          type="button"
+          onClick={() => onSave(activeCard.slug, {
+            title: draft.title,
+            definition: draft.definition,
+            keyFacts: splitLines(draft.keyFacts),
+            tags: splitLines(draft.tags.replace(/,/g, '\n')),
+            aliases: splitLines(draft.aliases.replace(/,/g, '\n')),
+            relatedCards: splitLines(draft.relatedCards.replace(/,/g, '\n')),
+          })}
+          disabled={loading}
+        >
+          <Check size={15} />
+          Save Card
+        </button>
       </div>
     </section>
   );
@@ -1584,8 +1407,6 @@ function WikiWorkspace({
 function SourcePanel({
   mode,
   activeMessage,
-  activeCommunity,
-  activeNode,
   sources,
   sourcesLoading,
   sourcesError,
@@ -1593,17 +1414,13 @@ function SourcePanel({
   onCitationHover,
   onOpenSourceFile,
   activeFile,
-  onSelectWikiNode,
   fileRefs,
   fileRefsLoading,
   fileRefsError,
   onNavigateToFileReference,
-  wikiGraph,
 }: {
   mode: WorkspaceMode;
   activeMessage?: ChatMessage;
-  activeCommunity?: WikiCommunity;
-  activeNode?: WikiGraphNode;
   sources: SourcePanelItem[];
   sourcesLoading: boolean;
   sourcesError?: string;
@@ -1611,33 +1428,23 @@ function SourcePanel({
   onCitationHover: (index?: number) => void;
   onOpenSourceFile: (path: string) => void;
   activeFile?: FileNode;
-  onSelectWikiNode: (path: string) => void;
   fileRefs: FileReference[];
   fileRefsLoading: boolean;
   fileRefsError?: string;
   onNavigateToFileReference: (ref: FileReference) => void;
-  wikiGraph: WikiGraph;
 }) {
   const isEditorMode = mode === 'editor';
-  const backlinks = useMemo(() => {
-    if (mode !== 'wiki' || !activeNode) return [];
-    return (wikiGraph.backlinks.get(activeNode.path) ?? [])
-      .map((path) => wikiGraph.nodeMap.get(path))
-      .filter((node): node is WikiGraphNode => Boolean(node));
-  }, [activeNode, mode, wikiGraph.backlinks, wikiGraph.nodeMap]);
   return (
     <aside className="source-panel">
       <div className="source-panel__header">
         <div>
-          <strong>{mode === 'wiki' ? 'Node Detail' : 'Source'}</strong>
+          <strong>Source</strong>
           <span>
             {mode === 'editor'
               ? (activeFile?.name ?? '未选择文件')
               : mode === 'qa'
                 ? (activeMessage?.createdAt ?? '未选择消息')
-                : activeNode
-                  ? (activeCommunity ? `${activeCommunity.title} · ${activeNode.title}` : activeNode.title)
-                  : '未选择节点'}
+                : 'Knowledge Card'}
           </span>
         </div>
       </div>
@@ -1662,88 +1469,9 @@ function SourcePanel({
             onOpenSourceFile={onOpenSourceFile}
           />
         ) : (
-          <div className="source-list">
-            {activeNode ? (
-              <>
-                <div className="message-group">
-                  <span>Wiki Node</span>
-                  <strong>{activeNode.title}</strong>
-                </div>
-                <article className="source-card">
-                  <div className="source-card__summary">
-                    <div className="source-card__top">
-                      <span className={`wiki-item__badge wiki-item__badge--${activeNode.type}`}>{formatWikiType(activeNode.type)}</span>
-                      <span className={`wiki-status wiki-status--${activeNode.status}`}>{activeNode.status}</span>
-                    </div>
-                    <span className="source-card__path">{activeNode.path}</span>
-                    <span className="source-card__file">
-                      {activeNode.sources.length} sources · {activeNode.neighbors.length} neighbors
-                    </span>
-                  </div>
-                </article>
-
-                {activeNode.summary && (
-                  <div className="wiki-side-section">
-                    <strong>Summary</strong>
-                    <p className="wiki-side-summary">{activeNode.summary}</p>
-                  </div>
-                )}
-
-                {activeNode.sources.length > 0 && (
-                  <div className="wiki-side-section">
-                    <strong>Sources</strong>
-                    <div className="wiki-side-list">
-                      {activeNode.sources.map((source) => (
-                        <button key={source} type="button" className="wiki-side-link" onClick={() => onOpenSourceFile(source)}>
-                          {source}
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-                )}
-
-                {activeNode.related.length > 0 && (
-                  <div className="wiki-side-section">
-                    <strong>Related Pages</strong>
-                    <div className="wiki-side-list">
-                      {activeNode.related.map((path) => {
-                        const page = wikiGraph.nodeMap.get(path);
-                        return (
-                          <button key={path} type="button" className="wiki-side-link" onClick={() => onSelectWikiNode(path)}>
-                            {page?.title ?? path}
-                          </button>
-                        );
-                      })}
-                    </div>
-                  </div>
-                )}
-
-                {backlinks.length > 0 && (
-                  <div className="wiki-side-section">
-                    <strong>Backlinks</strong>
-                    <div className="wiki-side-list">
-                      {backlinks.map((node) => (
-                        <button key={node.path} type="button" className="wiki-side-link" onClick={() => onSelectWikiNode(node.path)}>
-                          {node.title}
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-                )}
-
-                {activeNode.body && (
-                  <div className="wiki-side-section">
-                    <strong>Preview</strong>
-                    <MarkdownLite content={activeNode.body} />
-                  </div>
-                )}
-              </>
-            ) : (
-              <div className="empty-panel">
-                <Network size={18} />
-                <span>点击图谱节点查看详情</span>
-              </div>
-            )}
+          <div className="empty-panel">
+            <Database size={18} />
+            <span>Knowledge Card 详情在主工作区编辑</span>
           </div>
         )}
       </div>
@@ -2081,40 +1809,11 @@ export function App() {
   const [fileRefs, setFileRefs] = useState<FileReference[]>([]);
   const [fileRefsLoading, setFileRefsLoading] = useState(false);
   const [fileRefsError, setFileRefsError] = useState<string>();
-  const [wikiGraph, setWikiGraph] = useState<WikiGraph>({
-    meta: {
-      buildDate: '',
-      sourceDir: 'diary',
-      totalNodes: 0,
-      totalEdges: 0,
-      totalCommunities: 0,
-      degraded: false,
-      insightsDegraded: false,
-    },
-    communities: [],
-    nodes: [],
-    nodeMap: new Map(),
-    edges: [],
-    backlinks: new Map(),
-    insights: {
-      surprisingConnections: [],
-      isolatedNodes: [],
-      bridgeNodes: [],
-      sparseCommunities: [],
-      meta: {
-        degraded: false,
-        nodeCount: 0,
-        edgeCount: 0,
-        maxInsightNodes: 0,
-        maxInsightEdges: 0,
-      },
-    },
-  });
-  const [wikiGraphLoading, setWikiGraphLoading] = useState(false);
-  const [wikiGraphError, setWikiGraphError] = useState<string>();
-  const [activeWikiCommunityId, setActiveWikiCommunityId] = useState<string>();
-  const [activeWikiNodePath, setActiveWikiNodePath] = useState<string>();
-  const [wikiQuery, setWikiQuery] = useState('');
+  const [knowledgeCards, setKnowledgeCards] = useState<KnowledgeCard[]>([]);
+  const [knowledgeHealth, setKnowledgeHealth] = useState<KnowledgeHealth>();
+  const [knowledgeQuery, setKnowledgeQuery] = useState('');
+  const [knowledgeLoading, setKnowledgeLoading] = useState(false);
+  const [activeKnowledgeSlug, setActiveKnowledgeSlug] = useState<string>();
   const pendingNavigationMessageId = useRef<string>();
 
   const activeFile = useMemo(
@@ -2136,14 +1835,10 @@ export function App() {
     const citations = remoteCitations[activeMessage.id];
     return citations && citations.length > 0 ? mapCitationsToSources(activeMessage.id, citations) : [];
   }, [activeMessage, remoteCitations]);
-  const activeWikiCommunity = useMemo(
-    () => getSelectedCommunity(wikiGraph, activeWikiCommunityId, activeWikiNodePath),
-    [activeWikiCommunityId, activeWikiNodePath, wikiGraph],
+  const activeKnowledgeCard = useMemo(
+    () => knowledgeCards.find((card) => card.slug === activeKnowledgeSlug) ?? knowledgeCards[0],
+    [activeKnowledgeSlug, knowledgeCards],
   );
-  const activeWikiNode = useMemo(() => {
-    const fallbackPath = activeWikiNodePath ?? activeWikiCommunity?.hubPath;
-    return fallbackPath ? wikiGraph.nodeMap.get(fallbackPath) : undefined;
-  }, [activeWikiCommunity?.hubPath, activeWikiNodePath, wikiGraph.nodeMap]);
 
   const setActiveEditorValue = (value: string) => {
     if (!activeFileId) return;
@@ -2200,7 +1895,7 @@ export function App() {
 
   const refreshFileTree = async (preferredFileId?: string) => {
     const remoteFiles = await getFileTree();
-    // 过滤掉wiki文件夹，Wiki由LLM自动维护，不应手动编辑
+    // Generated knowledge export folders are not edited through the file explorer.
     const filteredFiles = remoteFiles.filter((node) => node.name !== 'wiki');
     setFiles(filteredFiles);
     setExpanded((current) => new Set([...current, ...filteredFiles.map((node) => node.id)]));
@@ -2209,21 +1904,6 @@ export function App() {
     const nextFile = preferred?.type === 'file' ? preferred : findFirstFile(filteredFiles);
     setActiveFileId(nextFile?.id);
     return nextFile;
-  };
-
-  const loadWikiGraph = async () => {
-    setWikiGraphLoading(true);
-    setWikiGraphError(undefined);
-    try {
-      const graph = await getWikiGraph();
-      setWikiGraph(graph);
-      return graph;
-    } catch (caught) {
-      setWikiGraphError(caught instanceof Error ? caught.message : 'Wiki 图谱加载失败');
-      return undefined;
-    } finally {
-      setWikiGraphLoading(false);
-    }
   };
 
   useEffect(() => {
@@ -2380,34 +2060,29 @@ export function App() {
     };
   }, [mode, activeFile?.path, activeFile?.type]);
 
-  useEffect(() => {
-    if (mode !== 'wiki') return;
-    if (wikiGraph.nodes.length === 0 && !wikiGraphLoading) {
-      loadWikiGraph().catch((caught) => {
-        setWikiGraphError(caught instanceof Error ? caught.message : 'Wiki 图谱加载失败');
-      });
+  const loadKnowledgeCards = async () => {
+    setKnowledgeLoading(true);
+    try {
+      const [cards, health] = await Promise.all([listKnowledgeCards(), getKnowledgeHealth()]);
+      setKnowledgeCards(cards);
+      setKnowledgeHealth(health);
+      if (cards.length > 0 && !cards.some((card) => card.slug === activeKnowledgeSlug)) {
+        setActiveKnowledgeSlug(cards[0].slug);
+      }
+      return cards;
+    } finally {
+      setKnowledgeLoading(false);
     }
-  }, [mode, wikiGraph.nodes.length, wikiGraphLoading]);
+  };
 
   useEffect(() => {
-    if (mode !== 'wiki') return;
-    if (wikiGraph.communities.length === 0) {
-      setActiveWikiCommunityId(undefined);
-      setActiveWikiNodePath(undefined);
-      return;
+    if (mode !== 'knowledge') return;
+    if (knowledgeCards.length === 0 && !knowledgeLoading) {
+      loadKnowledgeCards().catch((caught) => {
+        setError(caught instanceof Error ? caught.message : 'Knowledge 加载失败');
+      });
     }
-    const selectedCommunity = getSelectedCommunity(wikiGraph, activeWikiCommunityId, activeWikiNodePath);
-    if (!selectedCommunity) return;
-    if (selectedCommunity.id !== activeWikiCommunityId) {
-      setActiveWikiCommunityId(selectedCommunity.id);
-    }
-    const nextPath = activeWikiNodePath && wikiGraph.nodeMap.has(activeWikiNodePath)
-      ? activeWikiNodePath
-      : selectedCommunity.hubPath;
-    if (nextPath && nextPath !== activeWikiNodePath) {
-      setActiveWikiNodePath(nextPath);
-    }
-  }, [mode, activeWikiCommunityId, activeWikiNodePath, wikiGraph]);
+  }, [mode, knowledgeCards.length, knowledgeLoading]);
 
   const handleSelectSession = async (sessionId: string) => {
     pendingNavigationMessageId.current = undefined;
@@ -2448,48 +2123,52 @@ export function App() {
     }
   };
 
-  const handleSelectWikiCommunity = async (communityId: string) => {
-    const community = wikiGraph.communities.find((item) => item.id === communityId);
-    if (!community) return;
-    setActiveWikiCommunityId(community.id);
-    setActiveWikiNodePath(community.hubPath);
-    setMode('wiki');
+  const handleSelectKnowledgeCard = (slug: string) => {
+    setActiveKnowledgeSlug(slug);
+    setMode('knowledge');
   };
 
-  const handleSelectWikiNode = async (path: string) => {
-    const normalized = normalizeWikiPath(path);
-    const community = getCommunityForNode(wikiGraph, normalized);
-    if (!community) return;
-    setActiveWikiCommunityId(community.id);
-    setActiveWikiNodePath(normalized);
-    setMode('wiki');
-  };
-
-  const handleRefreshWiki = async () => {
+  const handleRefreshKnowledge = async () => {
     setRefreshing(true);
-    setWikiGraphError(undefined);
+    setError(undefined);
     try {
-      await rebuildWiki(false);
-      const refreshedGraph = await loadWikiGraph();
-      if (refreshedGraph && refreshedGraph.communities.length > 0) {
-        const selectedCommunity = getSelectedCommunity(
-          refreshedGraph,
-          activeWikiCommunityId,
-          activeWikiNodePath,
-        );
-        const nextCommunity = selectedCommunity ?? refreshedGraph.communities[0];
-        if (nextCommunity) {
-          setActiveWikiCommunityId(nextCommunity.id);
-          setActiveWikiNodePath(nextCommunity.hubPath);
-        }
-      } else {
-        setActiveWikiCommunityId(undefined);
-        setActiveWikiNodePath(undefined);
-      }
+      await compileKnowledge();
+      await loadKnowledgeCards();
     } catch (caught) {
-      setWikiGraphError(caught instanceof Error ? caught.message : 'Wiki 重建失败');
+      setError(caught instanceof Error ? caught.message : 'Knowledge 编译失败');
     } finally {
       setRefreshing(false);
+    }
+  };
+
+  const handleMaintainKnowledge = async () => {
+    setKnowledgeLoading(true);
+    setError(undefined);
+    try {
+      const report = await maintainKnowledge();
+      setKnowledgeHealth(report);
+      await loadKnowledgeCards();
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : 'Knowledge 维护失败');
+    } finally {
+      setKnowledgeLoading(false);
+    }
+  };
+
+  const handleSaveKnowledgeCard = async (
+    slug: string,
+    updates: { title: string; definition: string; keyFacts: string[]; tags: string[]; aliases: string[]; relatedCards: string[] },
+  ) => {
+    setKnowledgeLoading(true);
+    setError(undefined);
+    try {
+      const saved = await updateKnowledgeCard(slug, updates);
+      setKnowledgeCards((current) => current.map((card) => (card.slug === slug ? saved : card)));
+      setActiveKnowledgeSlug(saved.slug);
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : 'Card 保存失败');
+    } finally {
+      setKnowledgeLoading(false);
     }
   };
 
@@ -2517,8 +2196,8 @@ export function App() {
       await getHealth();
       const selectedId = await refreshSessionList(activeSessionId);
       const nextFile = await refreshFileTree(activeFileId);
-      if (mode === 'wiki') {
-        await handleRefreshWiki();
+      if (mode === 'knowledge') {
+        await loadKnowledgeCards();
       }
       if (selectedId) {
         await loadMessagesForSession(selectedId);
@@ -2835,7 +2514,7 @@ export function App() {
     }
   };
 
-  const currentError = error ?? (mode === 'wiki' ? wikiGraphError : undefined);
+  const currentError = error;
 
   return (
     <div className="app-shell">
@@ -2843,12 +2522,12 @@ export function App() {
         mode={mode}
         files={files}
         sessions={sessions}
-        wikiGraph={wikiGraph}
+        knowledgeCards={knowledgeCards}
         activeFileId={activeFileId}
         activeSessionId={activeSessionId}
-        activeWikiCommunityId={activeWikiCommunityId}
+        activeKnowledgeSlug={activeKnowledgeSlug}
         expanded={expanded}
-        wikiQuery={wikiQuery}
+        knowledgeQuery={knowledgeQuery}
         refreshing={refreshing}
         creating={creating}
         onSelectFile={handleSelectFile}
@@ -2860,19 +2539,16 @@ export function App() {
         onSelectSession={handleSelectSession}
         onCreateSession={handleCreateSession}
         onDeleteSession={handleDeleteSession}
-        activeWikiNodeId={activeWikiNodePath}
-        onSelectWikiNode={handleSelectWikiNode}
-        onSelectWikiCommunity={handleSelectWikiCommunity}
-        onChangeWikiQuery={setWikiQuery}
-        onRefreshWiki={handleRefreshWiki}
+        onSelectKnowledgeCard={handleSelectKnowledgeCard}
+        onChangeKnowledgeQuery={setKnowledgeQuery}
+        onRefreshKnowledge={handleRefreshKnowledge}
       />
 
       <main className="workspace">
         <WorkspaceHeader
           activeFile={activeFile}
           activeSession={activeSession}
-          activeWikiCommunity={activeWikiCommunity}
-          activeWikiNode={activeWikiNode}
+          activeKnowledgeCard={activeKnowledgeCard}
           mode={mode}
           saving={saving}
           onModeChange={setMode}
@@ -2881,7 +2557,7 @@ export function App() {
           onFormat={handleFormat}
           onCreateSession={handleCreateSession}
           onRefresh={handleRefresh}
-          onRefreshWiki={handleRefreshWiki}
+          onRefreshKnowledge={handleRefreshKnowledge}
         />
         {currentError && (
           <div className="error-banner">
@@ -2889,17 +2565,14 @@ export function App() {
             {currentError}
           </div>
         )}
-        {mode === 'wiki' ? (
-          <WikiWorkspace
-            graph={wikiGraph}
-            activeCommunity={activeWikiCommunity}
-            activeNode={activeWikiNode}
-            loading={wikiGraphLoading}
-            error={wikiGraphError}
-            onSelectCommunity={handleSelectWikiCommunity}
-            onSelectNode={handleSelectWikiNode}
-            onOpenSourceFile={handleOpenSourceFile}
-            onRefresh={handleRefreshWiki}
+        {mode === 'knowledge' ? (
+          <KnowledgeWorkspace
+            cards={knowledgeCards}
+            activeCard={activeKnowledgeCard}
+            health={knowledgeHealth}
+            loading={knowledgeLoading || refreshing}
+            onSave={handleSaveKnowledgeCard}
+            onMaintain={handleMaintainKnowledge}
           />
         ) : (
           <HybridWorkspace
@@ -2937,8 +2610,6 @@ export function App() {
       <SourcePanel
         mode={mode}
         activeMessage={activeMessage}
-        activeCommunity={activeWikiCommunity}
-        activeNode={activeWikiNode}
         sources={activeSources}
         sourcesLoading={citationLoading}
         sourcesError={citationError}
@@ -2946,12 +2617,10 @@ export function App() {
         onCitationHover={setActiveCitationIndex}
         onOpenSourceFile={handleOpenSourceFile}
         activeFile={activeFile}
-        onSelectWikiNode={handleSelectWikiNode}
         fileRefs={fileRefs}
         fileRefsLoading={fileRefsLoading}
         fileRefsError={fileRefsError}
         onNavigateToFileReference={handleNavigateToFileReference}
-        wikiGraph={wikiGraph}
       />
     </div>
   );

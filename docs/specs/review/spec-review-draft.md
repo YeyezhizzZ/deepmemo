@@ -33,8 +33,8 @@
 | Query Routing | 基于硬编码关键词（`今天`, `ideas`, `memory`, `mock`）决定检索范围及是否使用 Web Search | `src/ai/query_router.py` | High | A | 人工已确认：`mock` 逻辑需保留，用于 Github 展示 |
 | AI Chat & RAG | SSE 流式回复，经过改写、路由、本地检索（及 Web 降级）、生成，附带本地文件引用 | `src/ai/service.py` | High | A | Web Search 仅在需要且 Local Search 信心不足时触发 |
 | Chat Tools (Skills) | 加载 `.agents/skills/` 执行，支持 `hv-analysis` 等工具注入系统 Prompt。 | `src/ai/chat_tools.py` | High | B | MVP 注明“不会自动执行脚本”，部分功能未实现 |
-| Wiki Graph | 生成复杂的双链 Wiki 图谱，包含 PageRank 变种、社区发现 (Louvain) 和桥接节点检测 | `src/wiki/graph.py` | High | A | |
-| Wiki Ingestion | 支持增量构建，使用文件 MD5 缓存、LLM 解析提取实体/概念、及 FILE 块生成输出 | `src/wiki/ingest_pipeline.py` | High | A | |
+| Wiki Graph | 已由 Knowledge Engine v1 取代；旧图谱源码和公开产品面已删除 | `docs/specs/deprecated.md` | High | D | 不得恢复或扩展 |
+| Wiki Ingestion | 已由 Knowledge Engine v1 取代；旧 ingestion 源码、脚本和公开路由已删除 | `docs/specs/deprecated.md` | High | D | 不得恢复或扩展 |
 | Blog Fetcher | 抓取微信公众号/RSS 并解析正文，用 LLM 总结成 JSON，是个巨大的单文件 CLI 工具 | `src/app/core/blog_fetcher.py` | High | B | 人工确认暂不重构 |
 | Diary Auto-Draft | API 路由存在，读取 `data/raw/` 但直接返回占位字符串并标注 "LLM integration pending" | `src/routers/diary.py` | High | D | 人工确认：废弃并删除 |
 | Monolithic Frontend | `App.tsx` 管理所有会话、文件树、编辑状态和 UI 渲染，长达近 3000 行 | `app/src/App.tsx` | High | B | 人工确认暂不重构，等待 spec 稳定 |

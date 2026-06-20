@@ -1,16 +1,18 @@
 # Wiki Graph
 
-* **Status**: Current / Human Reviewed
+* **Status**: Deprecated / Superseded by Knowledge Engine
 
 ## 1. Scope
-基于知识库构建图谱，提取概念、实体并进行拓扑分析。
+旧 Wiki graph 基于生成的 Wiki 页面构图，不再是当前产品行为。
 
 ## 2. Preserved Behaviors
-* **Louvain 社区发现**：使用改进的 Louvain 算法计算不同节点之间的 Community。
-* **边权重模型**：整合直接链接（Direct Link）、资源交集（Source Overlap）、Adamic-Adar 算法等生成复杂的 Edge 权重。
+* 主应用不再暴露 `/wiki/graph`。
+* 前端不再提供 Wiki graph workspace。
+* Agent 检索不依赖 Wiki graph；使用 Knowledge Card-first retrieval。
 
 ## 3. Evidence
-* `src/wiki/graph.py`
+* `docs/specs/deprecated.md`
+* `src/knowledge/retriever.py`
 
 ## 4. Current Flow
-读取生成的 Wiki 页面 (Frontmatter + Markdown Links) -> 构建邻接矩阵 -> 运行社区发现算法 -> 输出 graph.json。
+无当前运行流。旧 Wiki graph 属于 D 类行为，不得作为新需求依赖或扩展。

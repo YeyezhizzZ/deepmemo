@@ -1,41 +1,43 @@
 # Project Wiki Generation
 
+> **Status**: Deprecated / Superseded by `knowledge-engine-v1.goal.md`
+> **Decision**: 旧 Wiki 生成、图谱和公开产品面已经下线；不得再以本 Goal 作为实现入口。
+
 ## 1. Goal
-基于用户的 Markdown 日记语料，通过提取、去重、LLM 总结等手段，生成系统性关联的双链结构化知识库（Wiki），并通过图谱展示知识点。
+已废弃：基于用户 Markdown 日记语料生成双链 Wiki 和图谱的旧目标，不再是当前产品方向。
 
 ## 2. Why this goal matters
-日记是碎片化的流，用户难以系统性追溯。Wiki 生成能把流式信息转化为结构化智库，是产品的核心价值闭环。
+Knowledge Engine v1 已用 Knowledge Cards 取代旧 Wiki 作为结构化知识中间层、RAG evidence 和前端管理真值。
 
 ## 3. Related Specs
-* **Current Specs**: `wiki-graph.md`, `wiki-ingestion.md`
-* **Open Questions**: Wiki vs 本地搜索边界模糊问题
+* **Replacement Goal**: `knowledge-engine-v1.goal.md`
+* **Deprecated Record**: `docs/specs/deprecated.md`
 
 ## 4. Desired Behavior
-* 能够通过增量分析（MD5 哈希比对）减少无意义的 LLM 调用。
-* 系统需通过 Louvain 算法将相关的节点聚类成 Community 并高亮。
-* 能够定期或通过指令自动执行，对未梳理的 Markdown 文件进行入库整理。
+无。旧 Wiki 目标不得实现、依赖或扩展。
 
 ## 5. Non-goals
-* 改变用户原始的 Markdown 日记。
-* 构建纯实时搜索引擎（这部分交给 RAG 处理）。
+* 不恢复 Wiki 前端展示。
+* 不恢复 `/wiki/*` 公开 API。
+* 不恢复 `src/wiki/*` 生成管道。
 
 ## 6. Requirements
-* 新版改动不能影响已有的 `frontmatter` 解析格式。
-* 任何依赖大模型的处理必须具备 fallback 机制（启发式正则匹配等）。
+* 需要结构化知识时，必须使用 `data/knowledge/cards/*.yaml` 和 `/api/knowledge/*`。
 
 ## 7. Acceptance Criteria
-* 当执行重建命令时，必须能够正确解析带嵌套和多种引用标记的 Markdown。
-* Health 报告能够正确捕捉到 dangling links 和 stub pages。
+* `/wiki/*` 在主应用中返回 404。
+* 前端 build 不包含 Wiki mode/API/types。
 
 ## 8. Implementation Strategy
-（待具体扩展：见独立 Issue / 计划分配）
+无。该 Goal 已废弃。
 
 ## 9. Task Breakdown
-- [ ] 待定：基于具体的 OpenSpec Proposal 进行填充
+- [x] 由 Knowledge Engine v1 取代。
+- [x] 旧 Wiki 公开路由、前端模式、脚本和源码管道删除。
 
 ## 10. Validation Plan
-* 运行完整的测试套件。
-* 查看 `data/wiki` 输出结果是否合法。
+* `uv run pytest tests/api/test_wiki.py -q --tb=short`
+* `npm run build`
 
 ## 11. Docs Sync Requirements
-* 更新对应的 Current Spec 细节。
+* `current/wiki-ingestion.md` 与 `current/wiki-graph.md` 标记为废弃。

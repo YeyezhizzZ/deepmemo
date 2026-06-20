@@ -11,3 +11,8 @@
 * **Target**: `src/routers/session.py`（未挂载），重复的 Pydantic Models（`SessionCreate`, `SessionResponse` 等在 `main.py` 和 `schemas.py` 中重复定义），以及多次复制粘贴的 `get_db_connection` 和 `compute_file_hash`。
 * **Reason**: Vibe coding 的历史包袱，导致代码极难维护。
 * **Action**: 将通过 `legacy-cleanup` 目标被重构和合并，这些重复的实现被彻底废弃。
+
+## 3. 旧 Wiki 产品面与公开管道
+* **Target**: 前端 `Wiki` 模式、`app/src` 中的 Wiki graph/page API 客户端与类型、主应用挂载的 `/wiki/*` 路由、旧单文件 `/wiki/ingest` 两阶段生成入口、手写 Wiki page CRUD、Wiki graph/health/policy public endpoints。
+* **Reason**: 旧 Wiki 在 Knowledge Engine v1 之前承担展示、检索中间层和生成管道三种职责，输出质量和维护边界都不稳定。当前人工决策以 Knowledge Cards 作为 Agent 与前端管理真值，不再把 Wiki 作为用户可见产品面或公开 API 合约。
+* **Action**: 从主应用和前端删除。后续不得新增依赖或修复这些旧接口；需要知识管理时使用 `/api/knowledge/*` 和 `data/knowledge/cards/*.yaml`。

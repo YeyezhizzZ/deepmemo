@@ -4,6 +4,7 @@ from pathlib import Path
 from src.ai.local_tools import KnowledgeBaseTools
 from src.ai.query_router import QueryRouter
 from src.ai.types import Evidence, GrepHit, LocalSearchResult, RouteDecision
+from src.knowledge.retriever import KnowledgeRetriever
 
 
 class LocalSearchAgent:
@@ -14,14 +15,27 @@ class LocalSearchAgent:
         max_queries: int = 6,
         max_evidence: int = 8,
         read_context_lines: int = 8,
+        knowledge_retriever: KnowledgeRetriever | None = None,
     ):
         self.tools = tools or KnowledgeBaseTools()
         self.router = QueryRouter()
         self.max_queries = max_queries
         self.max_evidence = max_evidence
         self.read_context_lines = read_context_lines
+        self.knowledge_retriever = knowledge_retriever or KnowledgeRetriever(data_dir=self.tools.root_path)
 
     def search(self, question: str, route: RouteDecision | None = None) -> LocalSearchResult:
+        card_evidence = self.knowledge_retriever.search_evidence(question, limit=self.max_evidence)
+        if card_evidence:
+            return LocalSearchResult(
+                question=question,
+                evidence=card_evidence[: self.max_evidence],
+                searched_queries=[question],
+                searched_paths=["knowledge/cards"],
+                truncated=False,
+                message=None,
+            )
+
         route = route or self.router.route(question)
         queries = self._build_queries(question, route)
         paths = self._resolve_search_paths(route.path_hints)

@@ -7,21 +7,27 @@
 
 ## 2. Preserved Behaviors
 * **SSE 流式输出**：通过 `StreamingResponse` 传递 Event Stream 回复。
-* **基于权重的检索**：Local Search 作为主引擎，默认被开启并必须有证据支持才触发证据流。
+* **Card-first 本地检索**：Local Search 先查询 Knowledge Cards；命中时返回 Card evidence。
+* **ripgrep fallback**：Card 未命中时才进入原有基于 `rg` 的 Markdown 本地检索。
 * **有条件的 Web Fallback**：仅在 Local Search 证据 Confidence 极低，且路由判断 `needs_web=True` 时，才会触发外部搜索引擎（Web Search）。
+* **对话知识沉淀**：聊天达到提取阈值时，系统会把确认、纠正、决策和模式信号写入 `raw/conversations/` 并编译为 Knowledge Cards。
 
 ## 3. Evidence
 * `src/ai/service.py` (`KnowledgeQAService`)
+* `src/ai/local_search_agent.py`
 * `src/routers/chat.py`
+* `src/knowledge/retriever.py`
+* `src/knowledge/conversation_memory.py`
 
 ## 4. Current Flow
-User Question -> `QueryRewriter` (改写) -> `QueryRouter` (决定路径) -> `LocalSearch` (基于 `rg` 本地搜索 MD 文件) -> Fallback WebSearch -> `AnswerComposer` (拼接 Prompt 并调用 LLM) -> SSE 传回前端。
+User Question -> `QueryRewriter` -> `QueryRouter` -> `LocalSearch` 先查 Knowledge Cards -> 未命中再用 `rg` 搜索 Markdown -> 条件式 WebSearch -> `AnswerComposer` -> SSE/JSON 返回。聊天消息持久化后触发轻量 conversation extraction。
 
 ## 5. Interfaces / Related Files
 * `llm_service.py` 提供模型通信基础。
 
 ## 6. Known Gaps
-* 缺少完善的意图识别，极度依赖写死的硬编码。
+* Card 检索为关键词/BM25-lite 评分，尚未引入向量检索。
 
 ## 7. Regression Risks
 * 如果误改了证据拼装格式（如把 `[1]` 改错），前端引用面板可能无法正常解析。
+* 如果 Card evidence 的 `path` 或 `source_id` 格式改变，引用面板和回答引用可能失配。

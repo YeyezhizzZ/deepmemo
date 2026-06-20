@@ -11,5 +11,5 @@
 * **Status**: 实现了 Provider 抽象，但在 `extract/crawl/map` 功能上硬编码直连了 Tavily。Human Review 决定**暂不修改**，因为 Web 搜索技术选型尚未最终确定。
 
 ## 3. Wiki 图谱与本地搜索的边界
-* **Target**: Wiki Graph (Louvain, `src/wiki/`) vs FS 本地检索 (`rg`)。
-* **Status**: 目前两者存在平行演进，甚至存在重复的基础代码实现（如 `_slugify` 的不同版本）。需在未来进行架构收敛。
+* **Target**: 旧 Wiki Graph vs FS 本地检索。
+* **Status**: 已由 Knowledge Engine v1 收敛。旧 Wiki Graph、Ingestion、公开路由和前端产品面已废弃并删除；当前检索边界以 Knowledge Card-first retrieval + `rg` fallback 为准。

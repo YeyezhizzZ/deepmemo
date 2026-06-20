@@ -7,11 +7,13 @@ from pydantic import BaseModel
 from src.ai.chat_tools import ChatTool, UnknownChatToolError, get_chat_tool, list_chat_tools
 from src.ai.service import knowledge_qa_service
 from src.app.database import get_db_connection
+from src.knowledge.card_compiler import KnowledgeCardCompiler
 from src.models.schemas import ChatRequest, ChatToolResponse, MessageResponse
 
 router = APIRouter(prefix="/chat", tags=["chat"])
 MAX_HISTORY_MESSAGES = 20
 MAX_SUMMARY_ITEMS = 12
+EXTRACT_EVERY_N_TURNS = 10
 
 
 def get_session_row(session_id: str):
@@ -120,6 +122,18 @@ def update_session_summary(session_id: str, message_ids: list[str]):
     conn.close()
 
 
+def maybe_extract_conversation_memory(session_id: str, message_ids: list[str]) -> None:
+    if len(message_ids) < 4:
+        return
+    if len(message_ids) % EXTRACT_EVERY_N_TURNS != 0 and len(message_ids) != 4:
+        return
+    messages = build_llm_messages(session_id, max_messages=min(len(message_ids), MAX_HISTORY_MESSAGES))
+    try:
+        KnowledgeCardCompiler().compile_conversation(session_id, messages)
+    except Exception as exc:
+        print(f"[knowledge] conversation extraction skipped for {session_id}: {exc}", flush=True)
+
+
 def strip_generated_references(content: str) -> str:
     markers = ("\n## 引用", "\n### 引用", "\n## 参考", "\n### 参考")
     for marker in markers:
@@ -206,6 +220,7 @@ def chat(request: ChatRequest):
     update_session_message_ids(request.session_id, message_ids)
     update_session_topic(request.session_id, request.user_message, ai_content)
     update_session_summary(request.session_id, message_ids)
+    maybe_extract_conversation_memory(request.session_id, message_ids)
 
     return MessageResponse(
         message_id=ai_msg_id,
@@ -253,6 +268,7 @@ async def chat_stream(request: ChatRequest):
             update_session_message_ids(request.session_id, message_ids)
             update_session_topic(request.session_id, request.user_message, full_content)
             update_session_summary(request.session_id, message_ids)
+            maybe_extract_conversation_memory(request.session_id, message_ids)
             yield format_sse_event({"type": "done", "message": saved_message})
         except Exception as exc:
             if full_content:

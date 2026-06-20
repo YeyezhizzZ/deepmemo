@@ -1,17 +1,20 @@
 # Wiki Ingestion
 
-* **Status**: Current / Human Reviewed
+* **Status**: Deprecated / Superseded by Knowledge Engine
 
 ## 1. Scope
-将无结构的碎念 Markdown（Diary）转化为结构化的 Wiki 页面。
+旧 Wiki ingestion 管道，包括直接从 Diary/Raw 生成 Wiki 页面、Card-to-Wiki rebuild、单文件两阶段 `/wiki/ingest`，均不再是当前产品行为。
 
 ## 2. Preserved Behaviors
-* **增量构建与缓存**：使用 MD5 值与 `registry.json` 进行对比，避免未修改的文章浪费大模型 Token。
-* **两段式提取**：LLM 执行 Analysis 分析（实体、概念、综合、矛盾），再执行 Generation 生成格式化的 Markdown FILE。
+* **不再公开挂载**：主应用不再暴露 `/wiki/rebuild`、`/wiki/ingest`、`/wiki/pages`、`/wiki/page`、`/wiki/graph`、`/wiki/health`、`/wiki/policy`。
+* **不再作为前端工作流**：前端不再提供 Wiki 图谱、页面列表、页面详情或重建按钮。
+* **Knowledge Cards 为真值**：需要知识索引、检索、编辑和维护时使用 `data/knowledge/cards/*.yaml` 与 `/api/knowledge/*`。
 
 ## 3. Evidence
-* `src/wiki/ingest_pipeline.py`
-* `src/wiki/ingest_analyzer.py`
+* `docs/specs/deprecated.md`
+* `src/knowledge/card_compiler.py`
+* `src/knowledge/card_store.py`
+* `src/routers/knowledge.py`
 
 ## 4. Current Flow
-遍历 Diary -> 检查 Cache -> LLM 解析元数据 -> Heuristic/LLM Merger -> LLM 生成内容块 -> Link Resolver 更新内链 -> 写入磁盘并更新 Registry。
+无当前运行流。旧 Wiki ingestion 属于 D 类行为，不得作为新需求依赖或扩展。

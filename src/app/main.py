@@ -11,12 +11,13 @@ from pydantic import BaseModel
 from src.ai.service import knowledge_qa_service
 from src.app.database import init_db, get_db_connection
 from src.app.core.watcher import start_watcher, stop_watcher
+from src.knowledge.scheduler import start_knowledge_scheduler, stop_knowledge_scheduler
 from src.routers.fs import router as fs_router
 from src.routers.diary import router as diary_router
 from src.routers.pulse import router as pulse_router
 from src.routers.citations import router as citations_router
 from src.routers.chat import router as chat_router
-from src.routers.wiki import router as wiki_router
+from src.routers.knowledge import router as knowledge_router
 
 
 app = FastAPI(title="DeepMemo API", version="0.2.0")
@@ -132,10 +133,12 @@ def build_llm_messages(session_id: str) -> list[dict]:
 def startup():
     init_db()
     start_watcher()
+    start_knowledge_scheduler(DATA_DIR)
 
 @app.on_event("shutdown")
 def shutdown():
     stop_watcher()
+    stop_knowledge_scheduler()
 
 
 # --- FS Routers ---
@@ -144,7 +147,7 @@ app.include_router(diary_router)
 app.include_router(pulse_router)
 app.include_router(citations_router)
 app.include_router(chat_router)
-app.include_router(wiki_router)
+app.include_router(knowledge_router)
 
 
 # --- Session APIs ---

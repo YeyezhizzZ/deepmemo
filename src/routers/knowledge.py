@@ -1,0 +1,129 @@
+from __future__ import annotations
+
+import os
+from pathlib import Path
+from typing import Any
+
+from fastapi import APIRouter, HTTPException
+from pydantic import BaseModel, Field
+
+from src.knowledge.card_compiler import KnowledgeCardCompiler
+from src.knowledge.card_store import CardStore
+from src.knowledge.maintenance import KnowledgeMaintainer
+from src.knowledge.models import KnowledgeCard
+from src.knowledge.retriever import KnowledgeRetriever
+
+
+DATA_DIR = Path(os.getenv("DEEPMEMO_DATA_DIR", Path(__file__).resolve().parents[2] / "data"))
+router = APIRouter(prefix="/api/knowledge", tags=["knowledge"])
+
+
+class CompileFileRequest(BaseModel):
+    path: str
+
+
+class SearchRequest(BaseModel):
+    query: str
+    limit: int = Field(default=8, ge=1, le=50)
+
+
+def _store() -> CardStore:
+    return CardStore(DATA_DIR)
+
+
+def _compiler() -> KnowledgeCardCompiler:
+    return KnowledgeCardCompiler(DATA_DIR)
+
+
+@router.get("/cards")
+def list_cards(type: str | None = None, tag: str | None = None) -> dict[str, list[dict]]:
+    return {"cards": [card.to_dict() for card in _store().list_cards(card_type=type, tag=tag)]}
+
+
+@router.get("/cards/{slug}")
+def get_card(slug: str) -> dict:
+    try:
+        card = _store().load(slug)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    if card is None:
+        raise HTTPException(status_code=404, detail="Knowledge card not found")
+    return card.to_dict()
+
+
+@router.put("/cards/{slug}")
+def update_card(slug: str, updates: dict[str, Any]) -> dict:
+    store = _store()
+    try:
+        card = store.load(slug)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    if card is None:
+        raise HTTPException(status_code=404, detail="Knowledge card not found")
+
+    allowed_fields = set(KnowledgeCard.from_dict(card.to_dict()).to_dict()) - {"id", "slug", "created_at"}
+    for field, value in updates.items():
+        if field not in allowed_fields:
+            raise HTTPException(status_code=400, detail=f"Unsupported card field: {field}")
+        setattr(card, field, value)
+        if field not in card.human_edited_fields:
+            card.human_edited_fields.append(field)
+    card.human_edited = True
+    store.save(KnowledgeCard.from_dict(card.to_dict()))
+    return store.load(slug).to_dict()
+
+
+@router.delete("/cards/{slug}")
+def delete_card(slug: str) -> dict:
+    try:
+        deleted = _store().delete(slug)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    if not deleted:
+        raise HTTPException(status_code=404, detail="Knowledge card not found")
+    return {"slug": slug, "deleted": True}
+
+
+@router.post("/compile")
+def compile_all() -> dict:
+    return _compiler().compile_all().to_dict()
+
+
+@router.post("/compile/file")
+def compile_file(request: CompileFileRequest) -> dict:
+    try:
+        return _compiler().compile_file(request.path).to_dict()
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@router.post("/search")
+def search_cards(request: SearchRequest) -> dict:
+    return {"results": KnowledgeRetriever(DATA_DIR).search(request.query, limit=request.limit)}
+
+
+@router.get("/stats")
+def stats() -> dict:
+    return _store().load_index().stats
+
+
+@router.get("/health")
+def health() -> dict:
+    store = _store()
+    index = store.load_index()
+    orphan_cards: list[str] = []
+    for card in store.list_cards():
+        if card.sources and all(not (store.data_dir / source.path).exists() for source in card.sources):
+            orphan_cards.append(card.slug)
+    return {
+        "stats": index.stats,
+        "orphan_cards": orphan_cards,
+        "index_path": str(store.index_path),
+    }
+
+
+@router.post("/maintain")
+def maintain() -> dict:
+    return KnowledgeMaintainer(DATA_DIR).run_maintenance().to_dict()

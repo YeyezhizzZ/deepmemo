@@ -3,6 +3,7 @@ from __future__ import annotations
 from types import SimpleNamespace
 
 import src.routers.chat as chat_router_module
+from src.knowledge.card_store import CardStore
 
 
 def test_chat_endpoint_persists_answer_and_citations(client, insert_session):
@@ -49,6 +50,32 @@ def test_chat_endpoint_persists_answer_and_citations(client, insert_session):
     citations_response = client.get("/api/chat/citations", params={"message_id": body["message_id"]})
     assert citations_response.status_code == 200
     assert citations_response.json()["citations"][0]["file_path"] == "diary/0527.md"
+
+
+def test_chat_extracts_conversation_memory_after_four_messages(client, insert_session, test_data_dir):
+    class FakeKnowledgeQAService:
+        def answer(self, question, history=None, tool=None):
+            return SimpleNamespace(
+                content="同意，这个决策应该沉淀。",
+                local_result=SimpleNamespace(evidence=[]),
+            )
+
+    session_id = insert_session("Knowledge Session")
+    original_service = chat_router_module.knowledge_qa_service
+    chat_router_module.knowledge_qa_service = FakeKnowledgeQAService()
+    try:
+        for message in [
+            "我们应该用 Louvain 做社区发现。",
+            "对，就按这个决策沉淀。",
+        ]:
+            response = client.post("/chat", json={"session_id": session_id, "user_message": message})
+            assert response.status_code == 200
+    finally:
+        chat_router_module.knowledge_qa_service = original_service
+
+    cards = CardStore(data_dir=test_data_dir).list_cards(card_type="decision")
+    assert cards
+    assert cards[0].sources[0].path.startswith("raw/conversations/")
 
 
 def test_chat_tools_route_returns_tool_metadata(client):

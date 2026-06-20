@@ -15,8 +15,7 @@ DeepMemo 的 spec 体系给 AI coding agent 和人类协作者提供共同的行
 - [Constitution](/specs/constitution)
 - [AI Chat & RAG](/specs/current/ai-chat-rag)
 - [Query Routing](/specs/current/query-routing)
-- [Wiki Graph](/specs/current/wiki-graph)
-- [Wiki Ingestion](/specs/current/wiki-ingestion)
+- [Knowledge Engine](/specs/current/knowledge-engine)
 - [File System Watcher](/specs/current/fs-watcher)
 - [Asset Manager](/specs/current/asset-manager)
 - [Test Infrastructure](/specs/current/test-infrastructure)
@@ -29,3 +28,7 @@ DeepMemo 的 spec 体系给 AI coding agent 和人类协作者提供共同的行
 - `proposed/`：尚未确认的未来设计。
 - `review/`：讨论材料，不是需求。
 - `deprecated.md`：D 类废弃行为，不要依赖、扩展或修复其边缘问题。
+
+## Proposed Roadmaps
+
+- [Knowledge Engine v2 Roadmap](/specs/proposed/knowledge-engine-v2-roadmap)
