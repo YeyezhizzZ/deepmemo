@@ -5,6 +5,8 @@
 ## 设计材料
 
 - [问题记录](/design/issues)
+- [Knowledge Engine v1](/design/knowledge-engine-v1)
+- [Knowledge Engine v3 HTML Layer](/design/knowledge-engine-v3-html-layer)
 - [Agentic Testing Plan](/design/agentic_test/agentic_testing_plan)
 - [Spec Kit + OpenSpec 落地计划](/design/agentic_test/implementation_plan)
 - [Spec-to-Test Prompt](/design/agentic_test/spec_to_test_prompt)
