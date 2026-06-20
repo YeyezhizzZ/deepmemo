@@ -1,5 +1,8 @@
 from pathlib import Path
 
+from src.knowledge.card_store import CardStore
+from src.knowledge.models import EvidenceSource, KnowledgeCard
+
 
 def test_knowledge_compile_file_crud_search_stats_and_health(client, test_data_dir: Path):
     source = test_data_dir / "diary" / "0620.md"
@@ -56,3 +59,52 @@ def test_knowledge_compile_file_crud_search_stats_and_health(client, test_data_d
 def test_knowledge_compile_file_rejects_path_traversal(client):
     response = client.post("/api/knowledge/compile/file", json={"path": "../secret.md"})
     assert response.status_code == 400
+
+
+def test_repowiki_api_rebuild_list_and_get_page(client, test_data_dir: Path):
+    CardStore(test_data_dir).save(
+        KnowledgeCard(
+            slug="architecture-decision",
+            title="Architecture Decision",
+            type="decision",
+            definition="Knowledge Cards are the structured truth layer.",
+            key_facts=["RepoWiki is generated from Cards only."],
+            sources=[EvidenceSource(path="diary/0620.md", evidence="Cards first", confidence=0.9)],
+            tags=["architecture"],
+        )
+    )
+    source = test_data_dir / "diary" / "0620.md"
+    source.parent.mkdir(parents=True, exist_ok=True)
+    source.write_text("# Source\n", encoding="utf-8")
+
+    rebuild_response = client.post("/api/knowledge/repowiki/rebuild")
+    assert rebuild_response.status_code == 200
+    assert rebuild_response.json()["pages"] == ["decisions"]
+
+    list_response = client.get("/api/knowledge/repowiki/pages")
+    assert list_response.status_code == 200
+    assert list_response.json()["pages"][0]["slug"] == "decisions"
+    assert list_response.json()["pages"][0]["title"] == "Decisions"
+
+    detail_response = client.get("/api/knowledge/repowiki/pages/decisions")
+    assert detail_response.status_code == 200
+    assert detail_response.json()["slug"] == "decisions"
+    assert "Architecture Decision" in detail_response.json()["content"]
+    assert client.get("/wiki/graph").status_code == 404
+
+
+def test_repowiki_api_rejects_unsafe_slug(client):
+    response = client.get("/api/knowledge/repowiki/pages/../cards")
+    assert response.status_code in {400, 404}
+
+
+def test_compile_commit_api_creates_commit_card(client):
+    response = client.post("/api/knowledge/compile/commit", json={"commit": "HEAD"})
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["card_slugs"]
+    detail = client.get(f"/api/knowledge/cards/{body['card_slugs'][0]}")
+    assert detail.status_code == 200
+    card = detail.json()
+    assert card["sources"][0]["path"].startswith("git:")

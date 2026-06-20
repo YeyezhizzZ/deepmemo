@@ -4,6 +4,7 @@ import 'vditor/dist/index.css';
 import {
   AlertCircle,
   AtSign,
+  BookOpen,
   Bot,
   Check,
   ChevronDown,
@@ -42,13 +43,16 @@ import {
   getHealth,
   getChatTools,
   getKnowledgeHealth,
+  getRepoWikiPage,
   getMessageCitations,
   compileKnowledge,
   listKnowledgeCards,
   maintainKnowledge,
+  listRepoWikiPages,
   listMessages,
   listSessions,
   moveFile,
+  rebuildRepoWiki,
   sendMessage,
   sendMessageStream,
   updateFileSyncStatus,
@@ -65,6 +69,7 @@ import type {
   SyncStatus,
   KnowledgeCard,
   KnowledgeHealth,
+  RepoWikiPage,
 } from './types';
 
 const exampleQuestions = [
@@ -74,6 +79,7 @@ const exampleQuestions = [
 ];
 
 type WorkspaceMode = 'editor' | 'qa' | 'knowledge';
+type KnowledgeView = 'cards' | 'repowiki';
 type FileNode = FsNode;
 
 type SourcePanelItem = SourceChunk & {
@@ -1280,15 +1286,27 @@ function splitLines(value: string): string[] {
 function KnowledgeWorkspace({
   cards,
   activeCard,
+  view,
+  pages,
+  activePage,
   health,
   loading,
+  onViewChange,
+  onSelectPage,
+  onRebuildRepoWiki,
   onSave,
   onMaintain,
 }: {
   cards: KnowledgeCard[];
   activeCard?: KnowledgeCard;
+  view: KnowledgeView;
+  pages: RepoWikiPage[];
+  activePage?: RepoWikiPage;
   health?: KnowledgeHealth;
   loading: boolean;
+  onViewChange: (view: KnowledgeView) => void;
+  onSelectPage: (slug: string) => void;
+  onRebuildRepoWiki: () => void;
   onSave: (slug: string, updates: { title: string; definition: string; keyFacts: string[]; tags: string[]; aliases: string[]; relatedCards: string[] }) => void;
   onMaintain: () => void;
 }) {
@@ -1312,9 +1330,81 @@ function KnowledgeWorkspace({
     });
   }, [activeCard?.slug]);
 
+  if (view === 'repowiki') {
+    return (
+      <section className="knowledge-workspace">
+        <div className="knowledge-toolbar">
+          <div className="knowledge-tabs" aria-label="Knowledge view">
+            <button type="button" onClick={() => onViewChange('cards')}>
+              <Database size={15} />
+              Cards
+            </button>
+            <button className="knowledge-tabs__button--active" type="button" onClick={() => onViewChange('repowiki')}>
+              <BookOpen size={15} />
+              RepoWiki
+            </button>
+          </div>
+          <button type="button" onClick={onRebuildRepoWiki} disabled={loading}>
+            <RefreshCw size={15} />
+            Rebuild RepoWiki
+          </button>
+        </div>
+
+        <div className="repowiki-layout">
+          <nav className="repowiki-pages" aria-label="RepoWiki pages">
+            {pages.length === 0 ? (
+              <div className="knowledge-list__empty">暂无 RepoWiki 页面</div>
+            ) : pages.map((page) => (
+              <button
+                type="button"
+                key={page.slug}
+                className={page.slug === activePage?.slug ? 'repowiki-page repowiki-page--active' : 'repowiki-page'}
+                onClick={() => onSelectPage(page.slug)}
+                title={page.path}
+              >
+                <BookOpen size={15} />
+                <span>{page.title}</span>
+                <small>{page.cardSlugs.length}</small>
+              </button>
+            ))}
+          </nav>
+          <article className="repowiki-reader">
+            {activePage ? (
+              <>
+                <div className="repowiki-reader__meta">
+                  <span>{activePage.path}</span>
+                  <span>{activePage.cardSlugs.length} source cards</span>
+                </div>
+                <MarkdownLite content={activePage.content} />
+              </>
+            ) : (
+              <div className="knowledge-empty">
+                <BookOpen size={24} />
+                <strong>RepoWiki</strong>
+                <span>从 Knowledge Cards 重建只读项目叙事</span>
+              </div>
+            )}
+          </article>
+        </div>
+      </section>
+    );
+  }
+
   if (!activeCard) {
     return (
       <section className="knowledge-workspace">
+        <div className="knowledge-toolbar">
+          <div className="knowledge-tabs" aria-label="Knowledge view">
+            <button className="knowledge-tabs__button--active" type="button" onClick={() => onViewChange('cards')}>
+              <Database size={15} />
+              Cards
+            </button>
+            <button type="button" onClick={() => onViewChange('repowiki')}>
+              <BookOpen size={15} />
+              RepoWiki
+            </button>
+          </div>
+        </div>
         <div className="knowledge-empty">
           <Database size={24} />
           <strong>Knowledge Cards</strong>
@@ -1327,6 +1417,16 @@ function KnowledgeWorkspace({
   return (
     <section className="knowledge-workspace">
       <div className="knowledge-toolbar">
+        <div className="knowledge-tabs" aria-label="Knowledge view">
+          <button className="knowledge-tabs__button--active" type="button" onClick={() => onViewChange('cards')}>
+            <Database size={15} />
+            Cards
+          </button>
+          <button type="button" onClick={() => onViewChange('repowiki')}>
+            <BookOpen size={15} />
+            RepoWiki
+          </button>
+        </div>
         <div className="knowledge-stats">
           <span>{health?.stats.total_cards ?? cards.length} cards</span>
           <span>{health?.orphan_cards.length ?? 0} orphan</span>
@@ -1814,6 +1914,9 @@ export function App() {
   const [knowledgeQuery, setKnowledgeQuery] = useState('');
   const [knowledgeLoading, setKnowledgeLoading] = useState(false);
   const [activeKnowledgeSlug, setActiveKnowledgeSlug] = useState<string>();
+  const [knowledgeView, setKnowledgeView] = useState<KnowledgeView>('cards');
+  const [repoWikiPages, setRepoWikiPages] = useState<RepoWikiPage[]>([]);
+  const [activeRepoWikiSlug, setActiveRepoWikiSlug] = useState<string>();
   const pendingNavigationMessageId = useRef<string>();
 
   const activeFile = useMemo(
@@ -1838,6 +1941,10 @@ export function App() {
   const activeKnowledgeCard = useMemo(
     () => knowledgeCards.find((card) => card.slug === activeKnowledgeSlug) ?? knowledgeCards[0],
     [activeKnowledgeSlug, knowledgeCards],
+  );
+  const activeRepoWikiPage = useMemo(
+    () => repoWikiPages.find((page) => page.slug === activeRepoWikiSlug) ?? repoWikiPages[0],
+    [activeRepoWikiSlug, repoWikiPages],
   );
 
   const setActiveEditorValue = (value: string) => {
@@ -2063,11 +2170,15 @@ export function App() {
   const loadKnowledgeCards = async () => {
     setKnowledgeLoading(true);
     try {
-      const [cards, health] = await Promise.all([listKnowledgeCards(), getKnowledgeHealth()]);
+      const [cards, health, pages] = await Promise.all([listKnowledgeCards(), getKnowledgeHealth(), listRepoWikiPages()]);
       setKnowledgeCards(cards);
       setKnowledgeHealth(health);
+      setRepoWikiPages(pages);
       if (cards.length > 0 && !cards.some((card) => card.slug === activeKnowledgeSlug)) {
         setActiveKnowledgeSlug(cards[0].slug);
+      }
+      if (pages.length > 0 && !pages.some((page) => page.slug === activeRepoWikiSlug)) {
+        setActiveRepoWikiSlug(pages[0].slug);
       }
       return cards;
     } finally {
@@ -2125,7 +2236,24 @@ export function App() {
 
   const handleSelectKnowledgeCard = (slug: string) => {
     setActiveKnowledgeSlug(slug);
+    setKnowledgeView('cards');
     setMode('knowledge');
+  };
+
+  const handleSelectRepoWikiPage = async (slug: string) => {
+    setKnowledgeLoading(true);
+    setError(undefined);
+    try {
+      const page = await getRepoWikiPage(slug);
+      setRepoWikiPages((current) => current.map((item) => (item.slug === slug ? page : item)));
+      setActiveRepoWikiSlug(slug);
+      setKnowledgeView('repowiki');
+      setMode('knowledge');
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : 'RepoWiki 页面加载失败');
+    } finally {
+      setKnowledgeLoading(false);
+    }
   };
 
   const handleRefreshKnowledge = async () => {
@@ -2133,6 +2261,7 @@ export function App() {
     setError(undefined);
     try {
       await compileKnowledge();
+      await rebuildRepoWiki();
       await loadKnowledgeCards();
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : 'Knowledge 编译失败');
@@ -2150,6 +2279,24 @@ export function App() {
       await loadKnowledgeCards();
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : 'Knowledge 维护失败');
+    } finally {
+      setKnowledgeLoading(false);
+    }
+  };
+
+  const handleRebuildRepoWiki = async () => {
+    setKnowledgeLoading(true);
+    setError(undefined);
+    try {
+      await rebuildRepoWiki();
+      const pages = await listRepoWikiPages();
+      setRepoWikiPages(pages);
+      if (pages.length > 0 && !pages.some((page) => page.slug === activeRepoWikiSlug)) {
+        setActiveRepoWikiSlug(pages[0].slug);
+      }
+      setKnowledgeView('repowiki');
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : 'RepoWiki 重建失败');
     } finally {
       setKnowledgeLoading(false);
     }
@@ -2569,8 +2716,14 @@ export function App() {
           <KnowledgeWorkspace
             cards={knowledgeCards}
             activeCard={activeKnowledgeCard}
+            view={knowledgeView}
+            pages={repoWikiPages}
+            activePage={activeRepoWikiPage}
             health={knowledgeHealth}
             loading={knowledgeLoading || refreshing}
+            onViewChange={setKnowledgeView}
+            onSelectPage={handleSelectRepoWikiPage}
+            onRebuildRepoWiki={handleRebuildRepoWiki}
             onSave={handleSaveKnowledgeCard}
             onMaintain={handleMaintainKnowledge}
           />

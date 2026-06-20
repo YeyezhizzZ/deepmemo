@@ -305,6 +305,30 @@ button:disabled {
   padding: 0 10px;
 }
 
+.knowledge-tabs {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--soft);
+  padding: 3px;
+}
+
+.knowledge-tabs button {
+  min-height: 30px;
+  border-color: transparent;
+  background: transparent;
+  padding: 0 9px;
+}
+
+.knowledge-tabs__button--active {
+  border-color: #c5d7ea !important;
+  background: #fff !important;
+  color: var(--text) !important;
+  box-shadow: 0 1px 2px rgb(15 23 42 / 8%);
+}
+
 .knowledge-stats,
 .knowledge-meta {
   display: flex;
@@ -384,6 +408,83 @@ button:disabled {
   grid-column: 1 / -1;
   margin: 0;
   color: var(--muted);
+}
+
+.repowiki-layout {
+  display: grid;
+  grid-template-columns: minmax(160px, 220px) minmax(0, 1fr);
+  gap: 14px;
+  min-height: 0;
+}
+
+.repowiki-pages {
+  display: grid;
+  align-content: start;
+  gap: 6px;
+  min-height: 0;
+  overflow: auto;
+  border-right: 1px solid var(--border);
+  padding-right: 10px;
+}
+
+.repowiki-page {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+  min-height: 34px;
+  border: 1px solid transparent;
+  border-radius: 7px;
+  background: transparent;
+  color: #26354d;
+  padding: 0 9px;
+  text-align: left;
+}
+
+.repowiki-page:hover,
+.repowiki-page--active {
+  border-color: #bdd0e4;
+  background: #f4f8fc;
+}
+
+.repowiki-page span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 13px;
+  font-weight: 650;
+}
+
+.repowiki-page small {
+  color: var(--weak);
+  font-size: 11px;
+}
+
+.repowiki-reader {
+  min-width: 0;
+  min-height: 0;
+  overflow: auto;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: #fff;
+  padding: 16px;
+}
+
+.repowiki-reader__meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 12px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.repowiki-reader__meta span {
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--soft);
+  padding: 4px 8px;
 }
 
 .file-node__hover-actions {

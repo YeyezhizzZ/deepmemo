@@ -166,6 +166,77 @@ def test_chat_rejects_invalid_tool_scope(client, insert_session):
     assert "next_message" in response.json()["detail"]
 
 
+def test_chat_knowledge_commands_add_show_update_pin_and_list(client, insert_session, test_data_dir):
+    class FailingKnowledgeQAService:
+        def answer(self, question, history=None, tool=None):
+            raise AssertionError("/knowledge commands must not call normal QA")
+
+    session_id = insert_session("Knowledge Commands")
+    original_service = chat_router_module.knowledge_qa_service
+    chat_router_module.knowledge_qa_service = FailingKnowledgeQAService()
+    try:
+        add_response = client.post(
+            "/chat",
+            json={
+                "session_id": session_id,
+                "user_message": "/knowledge add Card First Search :: Local search should query Cards before Markdown.",
+            },
+        )
+        assert add_response.status_code == 200
+        assert "card-first-search" in add_response.json()["content"]
+
+        show_response = client.post(
+            "/chat",
+            json={"session_id": session_id, "user_message": "/knowledge show card-first-search"},
+        )
+        assert show_response.status_code == 200
+        assert "Local search should query Cards" in show_response.json()["content"]
+
+        update_response = client.post(
+            "/chat",
+            json={
+                "session_id": session_id,
+                "user_message": "/knowledge update card-first-search :: Human reviewed command update.",
+            },
+        )
+        assert update_response.status_code == 200
+        assert "已更新" in update_response.json()["content"]
+
+        pin_response = client.post(
+            "/chat",
+            json={"session_id": session_id, "user_message": "/knowledge pin card-first-search definition"},
+        )
+        assert pin_response.status_code == 200
+        assert "已固定" in pin_response.json()["content"]
+
+        list_response = client.post(
+            "/chat",
+            json={"session_id": session_id, "user_message": "/knowledge list"},
+        )
+        assert list_response.status_code == 200
+        assert "Card First Search" in list_response.json()["content"]
+    finally:
+        chat_router_module.knowledge_qa_service = original_service
+
+    card = CardStore(data_dir=test_data_dir).load("card-first-search")
+    assert card is not None
+    assert card.definition == "Human reviewed command update."
+    assert card.human_edited is True
+    assert "definition" in card.human_edited_fields
+
+
+def test_chat_knowledge_command_returns_readable_error(client, insert_session):
+    session_id = insert_session("Invalid Knowledge Command")
+
+    response = client.post(
+        "/chat",
+        json={"session_id": session_id, "user_message": "/knowledge merge a b"},
+    )
+
+    assert response.status_code == 200
+    assert "不支持" in response.json()["content"]
+
+
 def test_chat_stream_rejects_missing_session(client):
     response = client.post(
         "/chat/stream",

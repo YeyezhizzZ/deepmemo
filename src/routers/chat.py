@@ -8,6 +8,7 @@ from src.ai.chat_tools import ChatTool, UnknownChatToolError, get_chat_tool, lis
 from src.ai.service import knowledge_qa_service
 from src.app.database import get_db_connection
 from src.knowledge.card_compiler import KnowledgeCardCompiler
+from src.knowledge.chat_commands import KnowledgeCommandHandler
 from src.models.schemas import ChatRequest, ChatToolResponse, MessageResponse
 
 router = APIRouter(prefix="/chat", tags=["chat"])
@@ -185,6 +186,33 @@ def resolve_chat_tool(request: ChatRequest) -> ChatTool | None:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
+def handle_knowledge_command(request: ChatRequest, message_ids: list[str]) -> MessageResponse | None:
+    handler = KnowledgeCommandHandler()
+    if not handler.is_command(request.user_message):
+        return None
+
+    user_msg_id = str(uuid.uuid4())
+    save_message(user_msg_id, request.session_id, "user", request.user_message)
+    message_ids.append(user_msg_id)
+
+    ai_content = handler.handle(request.user_message)
+    ai_msg_id = str(uuid.uuid4())
+    save_message(ai_msg_id, request.session_id, "ai", ai_content, [])
+    message_ids.append(ai_msg_id)
+
+    update_session_message_ids(request.session_id, message_ids)
+    update_session_topic(request.session_id, request.user_message, ai_content)
+    update_session_summary(request.session_id, message_ids)
+
+    return MessageResponse(
+        message_id=ai_msg_id,
+        session_id=request.session_id,
+        role="ai",
+        content=ai_content,
+        created_at=datetime.now(),
+    )
+
+
 @router.get("/tools", response_model=list[ChatToolResponse])
 def get_tools():
     return [
@@ -203,6 +231,9 @@ def chat(request: ChatRequest):
     selected_tool = resolve_chat_tool(request)
     session = get_session_row(request.session_id)
     message_ids = json.loads(session["message_ids"])
+    command_response = handle_knowledge_command(request, message_ids)
+    if command_response is not None:
+        return command_response
     llm_messages = build_llm_messages(request.session_id)
 
     user_msg_id = str(uuid.uuid4())

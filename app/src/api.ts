@@ -21,6 +21,8 @@ import type {
   ApiKnowledgeCard,
   KnowledgeCard,
   KnowledgeHealth,
+  ApiRepoWikiPage,
+  RepoWikiPage,
 } from './types';
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? '/api';
@@ -137,6 +139,16 @@ function mapKnowledgeCard(card: ApiKnowledgeCard): KnowledgeCard {
     stalenessScore: card.staleness_score,
     humanEdited: card.human_edited,
     humanEditedFields: card.human_edited_fields,
+  };
+}
+
+function mapRepoWikiPage(page: ApiRepoWikiPage): RepoWikiPage {
+  return {
+    slug: page.slug,
+    title: page.title,
+    content: page.content,
+    cardSlugs: page.card_slugs,
+    path: page.path,
   };
 }
 
@@ -402,4 +414,18 @@ export async function maintainKnowledge(): Promise<KnowledgeHealth> {
 
 export async function getKnowledgeHealth(): Promise<KnowledgeHealth> {
   return request<KnowledgeHealth>('/api/knowledge/health');
+}
+
+export async function rebuildRepoWiki(): Promise<{ pages: string[]; page_count: number }> {
+  return request<{ pages: string[]; page_count: number }>('/api/knowledge/repowiki/rebuild', { method: 'POST' });
+}
+
+export async function listRepoWikiPages(): Promise<RepoWikiPage[]> {
+  const response = await request<{ pages: ApiRepoWikiPage[] }>('/api/knowledge/repowiki/pages');
+  return response.pages.map(mapRepoWikiPage);
+}
+
+export async function getRepoWikiPage(slug: string): Promise<RepoWikiPage> {
+  const response = await request<ApiRepoWikiPage>(`/api/knowledge/repowiki/pages/${encodeURIComponent(slug)}`);
+  return mapRepoWikiPage(response);
 }

@@ -1,6 +1,6 @@
 # Knowledge Engine v2 Roadmap
 
-> **Status**: Proposed / Not Ready for Implementation
+> **Status**: Proposed / Partially Implemented
 > **Supersedes Gaps From**: `docs/specs/current/knowledge-engine.md`
 > **Rule**: This document is a roadmap. Before coding any item, split it into a Ready Goal under `docs/specs/goals/`.
 
@@ -10,7 +10,7 @@ DeepMemo Knowledge Engine v1 implements the local Knowledge Card truth layer, Ca
 
 It does **not** yet implement the full software-engineering knowledge engine described by Qoder-style Knowledge Engine 2.0: two-step Card -> RepoWiki condensation, commit-driven growth, team sharing, enterprise version arbitration, `/knowledge` human-in-the-loop command flows, vector retrieval, or AI-native semantic maintenance.
 
-This roadmap records what remains, how to implement it, and how each capability should be accepted.
+This roadmap records what remains, how to implement it, and how each capability should be accepted. The local v2 Core subset was split into `docs/specs/goals/knowledge-engine-v2-core.goal.md` and implemented; enterprise/team/vector capabilities remain proposed and require new Ready Goals before coding.
 
 ## 2. Current Baseline
 
@@ -25,15 +25,19 @@ Implemented in v1:
 * Frontend `Knowledge` mode lists, searches, edits, compiles, and maintains Cards.
 * Human-edited Card fields are protected from compiler overwrite.
 * Old `/wiki/*`, Wiki frontend mode, `src/wiki/*`, and old Wiki scripts are removed.
+* RepoWiki can be rebuilt from Cards and read in the frontend Knowledge mode.
+* Commit metadata can be compiled into Cards through API/CLI entry points.
+* `/knowledge` chat commands can list, show, add, update, and pin Cards.
+* Knowledge CLI supports compile, compile-file, compile-commit, maintain, validate, and repowiki rebuild.
 
 ## 3. Missing Capabilities
 
 | Area | Missing Capability | Why It Matters |
 | --- | --- | --- |
-| Human narrative layer | RepoWiki generated from Cards | Humans need coherent project explanations, not only dense Card records |
-| Code-side flywheel | Commit/diff-triggered Card update | File watcher sees content changes, but not the developer intent encoded in commits |
+| Human narrative layer | Richer RepoWiki editing/promotion model | Basic read-only RepoWiki exists; humans still need curated narrative promotion flows |
+| Code-side flywheel | Automatic commit/diff-triggered Card update | Explicit commit compile exists; no git hook or background commit watcher yet |
 | Conversation-side flywheel | Rich plan/spec/review extraction | Current extraction is heuristic and only catches simple conversation signals |
-| Human-in-loop command | `/knowledge` command in chat | Users need to create, rewrite, merge, or pin knowledge without leaving the chat flow |
+| Human-in-loop command | Full `/knowledge` command set | list/show/add/update/pin exists; merge/rewrite/review workflows remain |
 | Retrieval stack | Vector/embedding retrieval | Keyword search is brittle for semantic architecture and convention questions |
 | Semantic maintenance | LLM adjudication for conflicts/merges/staleness | Current maintenance is keyword-based and cannot reliably judge contradictions |
 | Team sharing | Shared Card namespace and provenance | Teams need personal vs team knowledge separation and promotion workflows |
@@ -44,6 +48,8 @@ Implemented in v1:
 ## 4. Implementation Plan
 
 ### Phase 2A: RepoWiki From Cards
+
+Status: **Implemented locally in v2 Core** for deterministic read-only pages from Cards. Remaining work: curated human narrative promotion, richer page taxonomy, and optional review workflow.
 
 Implement a new `src/knowledge/repowiki/` module. It should read Cards as the only structured input, group them by software-engineering topic, and write narrative Markdown under a new path such as `data/knowledge/repowiki/`.
 
@@ -57,12 +63,14 @@ Required APIs:
 
 Acceptance:
 
-* Given Cards for architecture, decisions, and lessons, rebuild produces deterministic Markdown pages with sources back to Card slugs and original evidence.
-* RepoWiki generation never mutates Cards.
-* `/wiki/*` remains 404.
-* Frontend shows RepoWiki as a read-only Knowledge subview, not as restored Wiki mode.
+* Implemented: Given Cards for decisions, patterns, lessons, concepts, and entities, rebuild produces deterministic Markdown pages with sources back to Card slugs and original evidence.
+* Implemented: RepoWiki generation never mutates Cards.
+* Implemented: `/wiki/*` remains 404.
+* Implemented: Frontend shows RepoWiki as a read-only Knowledge subview, not as restored Wiki mode.
 
 ### Phase 2B: Commit-Diff Flywheel
+
+Status: **Partially implemented in v2 Core** as explicit API/CLI commit compilation. Remaining work: automatic git hook template, branch-aware scheduling, and stronger changed-file-to-existing-Card targeting.
 
 Add a git-aware compiler that consumes commit metadata and diffs:
 
@@ -82,12 +90,15 @@ Possible entry points:
 
 Acceptance:
 
-* A commit that changes `src/ai/local_search_agent.py` updates Cards related to retrieval, not unrelated Cards.
-* Commit hash appears in Card sources.
-* Re-running the same commit compile is idempotent.
-* Old commits cannot overwrite human-edited fields.
+* Partially implemented: A commit creates/updates a deterministic commit Card with changed files in key facts.
+* Implemented: Commit hash appears in Card sources.
+* Implemented: Re-running the same commit compile is idempotent.
+* Implemented: Old commits cannot overwrite human-edited fields.
+* Remaining: Existing topic Cards should be selectively updated when changed files map to known Card sources.
 
 ### Phase 2C: Rich Conversation Memory
+
+Status: **Not implemented beyond v1 heuristic extraction**. This still needs a separate Ready Goal.
 
 Replace the lightweight heuristic extractor with a structured extractor that recognizes:
 
@@ -108,6 +119,8 @@ Acceptance:
 
 ### Phase 2D: `/knowledge` Command
 
+Status: **Partially implemented in v2 Core** for list/show/add/update/pin. Remaining work: merge, rewrite, review, and explicit RepoWiki intervention commands.
+
 Add chat command handling for direct knowledge operations:
 
 * `/knowledge list`
@@ -121,11 +134,14 @@ The command should update Cards through the same API/store path as the frontend 
 
 Acceptance:
 
-* Command tests verify successful update and invalid command errors.
-* `/knowledge update` marks edited fields as human-edited.
-* Command changes are visible in frontend Knowledge mode.
+* Implemented: Command tests verify successful add/show/update/pin/list and invalid command errors.
+* Implemented: `/knowledge update` marks edited fields as human-edited.
+* Implemented: Command changes are visible through the shared Knowledge Card API and frontend reload.
+* Remaining: `/knowledge merge <a> <b>` and rewrite/review workflows.
 
 ### Phase 2E: Hybrid Retrieval
+
+Status: **Not implemented**. This requires a separate Ready Goal because it introduces embedding provider boundaries and ranking semantics.
 
 Add optional vector retrieval behind a feature flag. Retrieval order should be:
 
@@ -142,6 +158,8 @@ Acceptance:
 
 ### Phase 2F: Semantic Maintenance
 
+Status: **Not implemented beyond v1 deterministic maintenance**. This requires a separate Ready Goal and mocked LLM adjudication tests.
+
 Extend maintenance from keyword checks to semantic checks:
 
 * contradiction adjudication
@@ -156,6 +174,8 @@ Acceptance:
 * Suggested merges do not auto-merge without user/API confirmation.
 
 ### Phase 2G: Team And Enterprise Mode
+
+Status: **Not implemented**. This requires a separate Ready Goal because it introduces namespace, identity, permissions, upload arbitration, and likely server-side persistence contracts.
 
 Introduce a namespace model:
 
@@ -181,6 +201,8 @@ Acceptance:
 
 ### Phase 2H: CLI And CI
 
+Status: **Implemented locally in v2 Core** for compile, compile-file, compile-commit, maintain, validate, and repowiki rebuild. Remaining work: packaging hook templates and CI documentation for team environments.
+
 Add `src/knowledge/cli.py` for non-IDE workflows:
 
 * `compile`
@@ -192,18 +214,18 @@ Add `src/knowledge/cli.py` for non-IDE workflows:
 
 Acceptance:
 
-* CLI commands run against a temporary `DEEPMEMO_DATA_DIR` in tests.
-* `validate` fails on invalid Card YAML, broken sources, or index drift.
-* CI can run `uv run python -m src.knowledge.cli validate`.
+* Implemented: CLI commands run against a temporary `DEEPMEMO_DATA_DIR` in tests.
+* Implemented: `validate` fails on invalid Card YAML, broken sources, or index drift.
+* Implemented: CI can run `uv run python -m src.knowledge.cli validate`.
 
 ## 5. Validation Matrix
 
 | Capability | Test Level | Required Verification |
 | --- | --- | --- |
 | RepoWiki APIs | L1 API + unit | API response shape, deterministic page generation, source links |
-| Commit compiler | Unit + integration | diff classification, idempotency, human field protection |
-| Conversation extractor | API + unit | chat thresholds, command triggers, mocked LLM extraction |
-| `/knowledge` command | API | successful edits, invalid syntax, human edit metadata |
+| Commit compiler | Unit + integration | commit metadata capture, idempotency, human field protection |
+| Conversation extractor | API + unit | chat thresholds, mocked LLM extraction |
+| `/knowledge` command | API | list/show/add/update/pin, invalid syntax, human edit metadata |
 | Hybrid retrieval | Unit + API | ranking, feature flag behavior, fallback preservation |
 | Semantic maintenance | API + unit | report shape, mock LLM path, no unconfirmed auto-merge |
 | Team versioning | API + unit | branch isolation, stale commit rejection, audit metadata |

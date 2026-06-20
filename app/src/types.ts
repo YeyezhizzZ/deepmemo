@@ -180,6 +180,14 @@ export type KnowledgeHealth = {
   index_path?: string;
 };
 
+export type RepoWikiPage = {
+  slug: string;
+  title: string;
+  content: string;
+  cardSlugs: string[];
+  path: string;
+};
+
 export type ApiKnowledgeCard = {
   id: string;
   slug: string;
@@ -198,6 +206,14 @@ export type ApiKnowledgeCard = {
   staleness_score: number;
   human_edited: boolean;
   human_edited_fields: string[];
+};
+
+export type ApiRepoWikiPage = {
+  slug: string;
+  title: string;
+  content: string;
+  card_slugs: string[];
+  path: string;
 };
 
 export type ApiFileReference = {

@@ -19,8 +19,12 @@ import src.routers.fs as fs_router
 import src.routers.pulse as pulse_router
 import src.knowledge.card_store as knowledge_card_store
 import src.knowledge.card_compiler as knowledge_card_compiler
+import src.knowledge.chat_commands as knowledge_chat_commands
+import src.knowledge.cli as knowledge_cli
+import src.knowledge.commit_compiler as knowledge_commit_compiler
 import src.knowledge.conversation_memory as knowledge_conversation_memory
 import src.knowledge.maintenance as knowledge_maintenance
+import src.knowledge.repowiki as knowledge_repowiki
 from src.app.database import init_db
 
 
@@ -40,8 +44,12 @@ def isolated_app_state(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setattr(knowledge_router, "DATA_DIR", data_dir)
     monkeypatch.setattr(knowledge_card_store, "DATA_DIR", data_dir)
     monkeypatch.setattr(knowledge_card_compiler, "DATA_DIR", data_dir)
+    monkeypatch.setattr(knowledge_chat_commands, "DATA_DIR", data_dir)
+    monkeypatch.setattr(knowledge_cli, "DATA_DIR", data_dir)
+    monkeypatch.setattr(knowledge_commit_compiler, "DATA_DIR", data_dir)
     monkeypatch.setattr(knowledge_conversation_memory, "DATA_DIR", data_dir)
     monkeypatch.setattr(knowledge_maintenance, "DATA_DIR", data_dir)
+    monkeypatch.setattr(knowledge_repowiki, "DATA_DIR", data_dir)
 
     init_db()
     return SimpleNamespace(data_dir=data_dir, db_path=db_path)

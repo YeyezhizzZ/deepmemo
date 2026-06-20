@@ -9,8 +9,10 @@ from pydantic import BaseModel, Field
 
 from src.knowledge.card_compiler import KnowledgeCardCompiler
 from src.knowledge.card_store import CardStore
+from src.knowledge.commit_compiler import CommitKnowledgeCompiler
 from src.knowledge.maintenance import KnowledgeMaintainer
 from src.knowledge.models import KnowledgeCard
+from src.knowledge.repowiki import RepoWikiBuilder
 from src.knowledge.retriever import KnowledgeRetriever
 
 
@@ -25,6 +27,10 @@ class CompileFileRequest(BaseModel):
 class SearchRequest(BaseModel):
     query: str
     limit: int = Field(default=8, ge=1, le=50)
+
+
+class CompileCommitRequest(BaseModel):
+    commit: str = "HEAD"
 
 
 def _store() -> CardStore:
@@ -99,6 +105,16 @@ def compile_file(request: CompileFileRequest) -> dict:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
 
 
+@router.post("/compile/commit")
+def compile_commit(request: CompileCommitRequest) -> dict:
+    try:
+        return CommitKnowledgeCompiler(DATA_DIR).compile_commit(request.commit).to_dict()
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
 @router.post("/search")
 def search_cards(request: SearchRequest) -> dict:
     return {"results": KnowledgeRetriever(DATA_DIR).search(request.query, limit=request.limit)}
@@ -127,3 +143,23 @@ def health() -> dict:
 @router.post("/maintain")
 def maintain() -> dict:
     return KnowledgeMaintainer(DATA_DIR).run_maintenance().to_dict()
+
+
+@router.post("/repowiki/rebuild")
+def rebuild_repowiki() -> dict:
+    return RepoWikiBuilder(DATA_DIR).rebuild()
+
+
+@router.get("/repowiki/pages")
+def list_repowiki_pages() -> dict:
+    return {"pages": [page.to_dict() for page in RepoWikiBuilder(DATA_DIR).list_pages()]}
+
+
+@router.get("/repowiki/pages/{slug}")
+def get_repowiki_page(slug: str) -> dict:
+    try:
+        return RepoWikiBuilder(DATA_DIR).load_page(slug).to_dict()
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
