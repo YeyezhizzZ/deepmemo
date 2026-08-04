@@ -92,6 +92,25 @@ class LLMService:
             return self._iter_stream_content(response)
         return response
 
+    def embed(self, texts: list[str]) -> list[list[float]]:
+        embedding_model = self.embedding_model()
+        assert self.client is not None
+        response = self.client.embeddings.create(
+            model=embedding_model,
+            input=texts,
+        )
+        return [list(item.embedding) for item in response.data]
+
+    def embedding_model(self) -> str:
+        self._ensure_configured()
+        assert self.provider is not None
+        embedding_model = str(self.provider.get("embedding_model") or "").strip()
+        if not embedding_model:
+            raise LLMConfigurationError(
+                f"LLM 配置缺少 embedding_model：{self.config_file}"
+            )
+        return embedding_model
+
     def _iter_stream_content(self, response):
         for chunk in response:
             choices = getattr(chunk, "choices", None) or []

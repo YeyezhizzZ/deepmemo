@@ -6,7 +6,9 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from src.knowledge.card_compiler import KnowledgeCardCompiler
 from src.knowledge.card_store import CardStore, DATA_DIR
+from src.knowledge.compiler_state import CandidateStore
 from src.knowledge.maintenance import KnowledgeMaintainer, MaintenanceReport
 from src.knowledge.models import KnowledgeCard
 from src.knowledge.repowiki import RepoWikiBuilder
@@ -31,6 +33,7 @@ class KnowledgeViewService:
         self.data_dir = Path(data_dir) if data_dir else DATA_DIR
         self.store = store or CardStore(self.data_dir)
         self.repowiki = RepoWikiBuilder(self.data_dir, store=self.store)
+        self.candidate_store = CandidateStore(self.data_dir)
         self.state_path = self.data_dir / "knowledge" / "review-state.json"
 
     def build_view(self) -> dict[str, Any]:
@@ -68,9 +71,20 @@ class KnowledgeViewService:
         return self.build_view()["review_queue"]
 
     def confirm_review_item(self, item_id: str) -> dict[str, Any]:
+        candidate = self._load_candidate(item_id)
+        if candidate is not None:
+            card = KnowledgeCardCompiler(self.data_dir, store=self.store).approve_candidate(
+                item_id
+            )
+            item = self._candidate_item(candidate)
+            return {**item, "status": "confirmed", "card_slugs": [card.slug]}
         return self._update_item(item_id, {"status": "confirmed", "updated_at": self._now()})
 
     def hide_review_item(self, item_id: str) -> dict[str, Any]:
+        candidate = self._load_candidate(item_id)
+        if candidate is not None:
+            KnowledgeCardCompiler(self.data_dir, store=self.store).reject_candidate(item_id)
+            return {**self._candidate_item(candidate), "status": "hidden"}
         return self._update_item(item_id, {"status": "hidden", "updated_at": self._now()})
 
     def request_rewrite(self, item_id: str, *, instruction: str = "") -> dict[str, Any]:
@@ -141,6 +155,9 @@ class KnowledgeViewService:
         report = self._safe_maintenance_report()
         state = self._load_state()
         items: list[dict[str, Any]] = []
+
+        for candidate in self.candidate_store.list():
+            items.append(self._candidate_item(candidate))
 
         for card in sorted(cards, key=lambda item: item.slug):
             items.append(
@@ -228,24 +245,47 @@ class KnowledgeViewService:
                 )
         return sorted(items, key=lambda item: (item["status"] != "open", item["severity"], item["id"]))
 
+    def _candidate_item(self, candidate: dict[str, Any]) -> dict[str, Any]:
+        card = KnowledgeCard.from_dict(candidate["card"])
+        reasons = [str(reason) for reason in candidate.get("reasons") or []]
+        return {
+            "id": str(candidate["id"]),
+            "kind": "compile_candidate",
+            "severity": "high" if "contradicted" in reasons else "medium",
+            "title": f"Compile Candidate: {card.title}",
+            "summary": card.definition,
+            "card_slugs": [card.slug],
+            "source_paths": [source.path for source in card.sources],
+            "suggested_action": "confirm",
+            "status": "open",
+            "updated_at": None,
+            "rewrite": None,
+            "reasons": reasons,
+        }
+
+    def _load_candidate(self, item_id: str) -> dict[str, Any] | None:
+        self._validate_safe_id(item_id)
+        try:
+            return self.candidate_store.load(item_id)
+        except FileNotFoundError:
+            return None
+
     def _graph(self, cards: list[KnowledgeCard]) -> dict[str, Any]:
         nodes = [self._graph_node(card) for card in sorted(cards, key=lambda item: item.slug)]
-        edges_by_key: dict[tuple[str, str, str], dict[str, str]] = {}
-        card_map = {card.slug: card for card in cards}
-        for card in cards:
-            for related in card.related_cards:
-                if related in card_map:
-                    left, right = sorted((card.slug, related))
-                    edges_by_key[(left, right, "related_card")] = {"from": left, "to": right, "reason": "related_card"}
-        for index, card in enumerate(cards):
-            for other in cards[index + 1 :]:
-                if set(card.tags) & set(other.tags):
-                    left, right = sorted((card.slug, other.slug))
-                    edges_by_key.setdefault((left, right, "shared_tag"), {"from": left, "to": right, "reason": "shared_tag"})
-                if {source.path for source in card.sources} & {source.path for source in other.sources}:
-                    left, right = sorted((card.slug, other.slug))
-                    edges_by_key.setdefault((left, right, "shared_source"), {"from": left, "to": right, "reason": "shared_source"})
-        return {"nodes": nodes, "edges": list(edges_by_key.values())}
+        edges = [
+            {
+                "from": relation["from"],
+                "to": relation["to"],
+                "reason": (
+                    "related_card"
+                    if relation["type"] == "related"
+                    else relation["type"]
+                ),
+                "confidence": relation["confidence"],
+            }
+            for relation in self.store.relation_store.list()
+        ]
+        return {"nodes": nodes, "edges": edges}
 
     def _overview(
         self,
@@ -273,7 +313,7 @@ class KnowledgeViewService:
                 "id": "relations",
                 "title": "Relations",
                 "value": len(graph["edges"]),
-                "summary": "Edges come from related_cards, shared tags, and shared sources.",
+                "summary": "Edges are explicit typed relations with provenance.",
             },
         ]
 

@@ -7,11 +7,13 @@ from typing import Any
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
+from src.knowledge.activity_log import append_activity
 from src.knowledge.card_compiler import KnowledgeCardCompiler
 from src.knowledge.card_store import CardStore
 from src.knowledge.commit_compiler import CommitKnowledgeCompiler
+from src.knowledge.evaluation import KnowledgeEvaluator
 from src.knowledge.maintenance import KnowledgeMaintainer
-from src.knowledge.models import KnowledgeCard
+from src.knowledge.models import CompileResult, KnowledgeCard
 from src.knowledge.repowiki import RepoWikiBuilder
 from src.knowledge.retriever import KnowledgeRetriever
 from src.knowledge.view_model import KnowledgeViewService
@@ -19,6 +21,16 @@ from src.knowledge.view_model import KnowledgeViewService
 
 DATA_DIR = Path(os.getenv("DEEPMEMO_DATA_DIR", Path(__file__).resolve().parents[2] / "data"))
 router = APIRouter(prefix="/api/knowledge", tags=["knowledge"])
+_EDITABLE_CARD_FIELDS = {
+    "title",
+    "type",
+    "density",
+    "definition",
+    "key_facts",
+    "related_cards",
+    "tags",
+    "aliases",
+}
 
 
 class CompileFileRequest(BaseModel):
@@ -42,12 +54,36 @@ class PinCardFieldRequest(BaseModel):
     field: str
 
 
+class EvalRequest(BaseModel):
+    min_health: float = Field(default=0.0, ge=0.0, le=100.0)
+    min_citation_coverage: float = Field(default=0.0, ge=0.0, le=100.0)
+    min_citation_precision: float = Field(default=0.0, ge=0.0, le=100.0)
+    record: bool = True
+
+
 def _store() -> CardStore:
     return CardStore(DATA_DIR)
 
 
 def _compiler() -> KnowledgeCardCompiler:
     return KnowledgeCardCompiler(DATA_DIR)
+
+
+def _compile_result_response(result: CompileResult) -> dict:
+    if (
+        result.errors
+        and not result.compiled_files
+        and not result.card_slugs
+        and not result.candidate_ids
+    ):
+        raise HTTPException(
+            status_code=503,
+            detail={
+                "message": "Knowledge compilation failed",
+                "errors": result.errors,
+            },
+        )
+    return result.to_dict()
 
 
 @router.get("/cards")
@@ -76,9 +112,8 @@ def update_card(slug: str, updates: dict[str, Any]) -> dict:
     if card is None:
         raise HTTPException(status_code=404, detail="Knowledge card not found")
 
-    allowed_fields = set(KnowledgeCard.from_dict(card.to_dict()).to_dict()) - {"id", "slug", "created_at"}
     for field, value in updates.items():
-        if field not in allowed_fields:
+        if field not in _EDITABLE_CARD_FIELDS:
             raise HTTPException(status_code=400, detail=f"Unsupported card field: {field}")
         setattr(card, field, value)
         if field not in card.human_edited_fields:
@@ -101,13 +136,38 @@ def delete_card(slug: str) -> dict:
 
 @router.post("/compile")
 def compile_all() -> dict:
-    return _compiler().compile_all().to_dict()
+    return _compile_result_response(_compiler().compile_all())
 
 
 @router.post("/compile/file")
 def compile_file(request: CompileFileRequest) -> dict:
     try:
-        return _compiler().compile_file(request.path).to_dict()
+        return _compile_result_response(_compiler().compile_file(request.path))
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@router.get("/candidates")
+def list_compile_candidates() -> dict:
+    return {"candidates": _compiler().list_candidates()}
+
+
+@router.post("/candidates/{candidate_id}/approve")
+def approve_compile_candidate(candidate_id: str) -> dict:
+    try:
+        return _compiler().approve_candidate(candidate_id).to_dict()
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@router.post("/candidates/{candidate_id}/reject")
+def reject_compile_candidate(candidate_id: str) -> dict:
+    try:
+        return _compiler().reject_candidate(candidate_id)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except FileNotFoundError as exc:
@@ -126,7 +186,15 @@ def compile_commit(request: CompileCommitRequest) -> dict:
 
 @router.post("/search")
 def search_cards(request: SearchRequest) -> dict:
-    return {"results": KnowledgeRetriever(DATA_DIR).search(request.query, limit=request.limit)}
+    retriever = KnowledgeRetriever(DATA_DIR)
+    results = retriever.search(request.query, limit=request.limit)
+    append_activity(
+        DATA_DIR,
+        "query",
+        request.query[:160],
+        [f"Pages: {', '.join(result['slug'] for result in results) or '(none)'}"],
+    )
+    return {"results": results, "warnings": retriever.last_warnings}
 
 
 @router.get("/stats")
@@ -137,14 +205,12 @@ def stats() -> dict:
 @router.get("/health")
 def health() -> dict:
     store = _store()
+    maintainer = KnowledgeMaintainer(DATA_DIR, store=store)
+    maintainer.update_staleness_scores()
     index = store.load_index()
-    orphan_cards: list[str] = []
-    for card in store.list_cards():
-        if card.sources and all(not (store.data_dir / source.path).exists() for source in card.sources):
-            orphan_cards.append(card.slug)
     return {
         "stats": index.stats,
-        "orphan_cards": orphan_cards,
+        "orphan_cards": maintainer.detect_orphans(),
         "index_path": str(store.index_path),
     }
 
@@ -152,6 +218,16 @@ def health() -> dict:
 @router.post("/maintain")
 def maintain() -> dict:
     return KnowledgeMaintainer(DATA_DIR).run_maintenance().to_dict()
+
+
+@router.post("/eval")
+def evaluate_knowledge(request: EvalRequest) -> dict:
+    return KnowledgeEvaluator(DATA_DIR).evaluate(
+        min_health=request.min_health,
+        min_citation_coverage=request.min_citation_coverage,
+        min_citation_precision=request.min_citation_precision,
+        record=request.record,
+    )
 
 
 @router.post("/repowiki/rebuild")

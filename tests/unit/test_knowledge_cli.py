@@ -24,10 +24,13 @@ def test_cli_validate_passes_when_cards_sources_and_index_match(test_data_dir: P
     assert main(["validate", "--data-dir", str(test_data_dir)]) == 0
 
 
-def test_cli_validate_fails_on_invalid_card_yaml(test_data_dir: Path):
-    cards_dir = test_data_dir / "knowledge" / "cards"
-    cards_dir.mkdir(parents=True)
-    (cards_dir / "broken.yaml").write_text("slug: broken\ntype: not-a-type\n", encoding="utf-8")
+def test_cli_validate_fails_on_invalid_wiki_page(test_data_dir: Path):
+    pages_dir = test_data_dir / "knowledge" / "wiki" / "concepts"
+    pages_dir.mkdir(parents=True)
+    (pages_dir / "broken.md").write_text(
+        "---\nslug: broken\ntype: not-a-type\n---\n# Broken\n",
+        encoding="utf-8",
+    )
 
     assert main(["validate", "--data-dir", str(test_data_dir)]) == 1
 
@@ -65,3 +68,33 @@ def test_cli_repowiki_rebuild_creates_pages(test_data_dir: Path):
     page = yaml.safe_load((test_data_dir / "knowledge" / "index.json").read_text(encoding="utf-8"))
     assert page["stats"]["total_cards"] == 1
     assert (test_data_dir / "knowledge" / "repowiki" / "lessons.md").exists()
+
+
+def test_cli_migrate_v2_preserves_legacy_yaml_and_creates_wiki_page(
+    test_data_dir: Path,
+):
+    legacy_dir = test_data_dir / "knowledge" / "cards"
+    legacy_dir.mkdir(parents=True)
+    legacy_path = legacy_dir / "legacy-card.yaml"
+    legacy_path.write_text(
+        yaml.safe_dump(
+            KnowledgeCard(
+                slug="legacy-card",
+                title="Legacy Card",
+                type="concept",
+                definition="Legacy YAML knowledge.",
+            ).to_dict(),
+            sort_keys=False,
+        ),
+        encoding="utf-8",
+    )
+
+    assert main(["migrate-v2", "--data-dir", str(test_data_dir)]) == 0
+    assert legacy_path.exists()
+    assert (
+        test_data_dir
+        / "knowledge"
+        / "wiki"
+        / "concepts"
+        / "legacy-card.md"
+    ).exists()

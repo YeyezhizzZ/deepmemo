@@ -1,4 +1,5 @@
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -101,3 +102,47 @@ def test_legacy_config_remains_supported(tmp_path: Path, monkeypatch: pytest.Mon
     response = LLMService(config_path).chat([])
 
     assert response["model"] == "legacy-model"
+
+
+def test_embedding_model_is_explicit_and_loaded_lazily(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    config_path = tmp_path / "llm.yaml"
+    config_path.write_text(
+        "\n".join(
+            [
+                "llm:",
+                "  use: test_provider",
+                "  test_provider:",
+                '    api_key: "test-key"',
+                '    api_base: "https://example.invalid/v1"',
+                '    model: "chat-model"',
+                '    embedding_model: "embedding-model"',
+            ]
+        ),
+        encoding="utf-8",
+    )
+    embedding_calls = []
+
+    class FakeEmbeddings:
+        def create(self, **kwargs):
+            embedding_calls.append(kwargs)
+            return SimpleNamespace(
+                data=[
+                    SimpleNamespace(embedding=[1.0, 0.0]),
+                    SimpleNamespace(embedding=[0.0, 1.0]),
+                ]
+            )
+
+    class FakeOpenAI:
+        def __init__(self, **kwargs):
+            self.embeddings = FakeEmbeddings()
+
+    monkeypatch.setattr(llm_module, "OpenAI", FakeOpenAI)
+    vectors = LLMService(config_path).embed(["first", "second"])
+
+    assert vectors == [[1.0, 0.0], [0.0, 1.0]]
+    assert embedding_calls == [
+        {"model": "embedding-model", "input": ["first", "second"]}
+    ]

@@ -38,6 +38,10 @@ jobs:
         working-directory: docs/wiki
       - run: uv run python scripts/verify.py --mode quick
       - run: uv run pytest tests/e2e -q --tb=short
+      - run: uv run python -m src.knowledge.cli validate --data-dir data
+      - run: >-
+          uv run python -m src.knowledge.cli eval --data-dir data --no-record
+          --min-health 90 --min-citation-coverage 90 --min-citation-precision 100
       - run: npm run docs:build
         working-directory: docs/wiki
       - run: npm audit --audit-level=high

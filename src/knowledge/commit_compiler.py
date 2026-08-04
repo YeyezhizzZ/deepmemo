@@ -4,8 +4,10 @@ import subprocess
 from datetime import datetime, timezone
 from pathlib import Path
 
+from src.knowledge.atomic_io import atomic_write_text
 from src.knowledge.card_store import CardStore, DATA_DIR
-from src.knowledge.models import CompileResult, EvidenceSource, KnowledgeCard
+from src.knowledge.models import CompileResult, EvidenceSource, KnowledgeCard, SourceSnapshot
+from src.knowledge.source_store import SourceStore
 
 
 class CommitKnowledgeCompiler:
@@ -18,10 +20,12 @@ class CommitKnowledgeCompiler:
         self.data_dir = Path(data_dir) if data_dir else DATA_DIR
         self.repo_dir = Path(repo_dir) if repo_dir else Path(__file__).resolve().parents[2]
         self.store = store or CardStore(self.data_dir)
+        self.source_store = SourceStore(self.data_dir)
 
     def compile_commit(self, commit: str) -> CompileResult:
         metadata = self._read_commit(commit)
-        card = self._card_from_commit(metadata)
+        snapshot = self._snapshot_commit(metadata)
+        card = self._card_from_commit(metadata, snapshot)
         existing = self.store.load(card.slug)
         if existing:
             card = self._merge(card, existing)
@@ -50,7 +54,11 @@ class CommitKnowledgeCompiler:
             "stats": stats,
         }
 
-    def _card_from_commit(self, metadata: dict) -> KnowledgeCard:
+    def _card_from_commit(
+        self,
+        metadata: dict,
+        snapshot: SourceSnapshot,
+    ) -> KnowledgeCard:
         short_hash = metadata["short_hash"]
         subject = metadata["subject"] or f"Commit {short_hash}"
         card_type = self._infer_type(subject, metadata["body"])
@@ -62,9 +70,7 @@ class CommitKnowledgeCompiler:
             f"Author: {metadata['author']}",
         ]
         facts.extend(files)
-        evidence = subject
-        if metadata["body"]:
-            evidence = f"{subject}\n{metadata['body']}".strip()
+        evidence = self.source_store.excerpt(snapshot, 1, snapshot.line_count)
         return KnowledgeCard(
             slug=f"commit-{short_hash}",
             title=subject,
@@ -75,13 +81,38 @@ class CommitKnowledgeCompiler:
             sources=[
                 EvidenceSource(
                     path=f"git:{short_hash}",
-                    evidence=evidence[:500],
-                    confidence=0.75,
+                    evidence=evidence,
+                    confidence=1.0,
+                    source_id=snapshot.source_id,
+                    source_hash=snapshot.source_hash,
+                    start_line=1,
+                    end_line=snapshot.line_count,
                 )
             ],
             tags=["commit", "code-flywheel", card_type],
             aliases=[metadata["hash"], short_hash],
+            confidence=1.0,
+            provenance_state="extracted",
+            model_id="deterministic-git-adapter",
+            prompt_version="git-adapter-v1",
         )
+
+    def _snapshot_commit(self, metadata: dict) -> SourceSnapshot:
+        short_hash = metadata["short_hash"]
+        rel_path = f"raw/git/commit-{short_hash}.md"
+        path = self.data_dir / rel_path
+        files = "\n".join(f"- `{file}`" for file in metadata["files"]) or "- None"
+        content = (
+            f"# {metadata['subject'] or f'Commit {short_hash}'}\n\n"
+            f"- Commit: `{metadata['hash']}`\n"
+            f"- Author: {metadata['author']}\n"
+            f"- Branch at capture: `{metadata['branch']}`\n\n"
+            f"## Message\n\n{metadata['body'] or '(no body)'}\n\n"
+            f"## Changed Files\n\n{files}\n\n"
+            f"## Diff Summary\n\n```text\n{metadata['stats']}\n```\n"
+        )
+        atomic_write_text(path, content)
+        return self.source_store.ingest_path(rel_path, source_type="git")
 
     def _infer_type(self, subject: str, body: str) -> str:
         text = f"{subject}\n{body}".lower()

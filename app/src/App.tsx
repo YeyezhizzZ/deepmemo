@@ -85,6 +85,16 @@ const exampleQuestions = [
 
 type WorkspaceMode = 'editor' | 'qa' | 'knowledge';
 type FileNode = FsNode;
+const knowledgeTypeDirectories: Record<KnowledgeCard['type'], string> = {
+  source: 'sources',
+  entity: 'entities',
+  concept: 'concepts',
+  decision: 'decisions',
+  pattern: 'patterns',
+  lesson: 'lessons',
+  synthesis: 'syntheses',
+  query: 'queries',
+};
 
 type SourcePanelItem = SourceChunk & {
   messageId: string;
@@ -552,7 +562,7 @@ function ModeSidebar({
       ) : mode === 'knowledge' ? (
         <>
           <div className="explorer-toolbar explorer-toolbar--knowledge" aria-label="Knowledge 操作">
-            <button type="button" title="编译 Knowledge Cards" onClick={onRefreshKnowledge} disabled={refreshing}>
+            <button type="button" title="编译 Knowledge Wiki" onClick={onRefreshKnowledge} disabled={refreshing}>
               <RefreshCw size={16} className={refreshing ? 'spin' : ''} />
               <span>{refreshing ? '编译中' : '编译 Card'}</span>
             </button>
@@ -707,8 +717,8 @@ function WorkspaceHeader({
   const pathLabel =
     mode === 'knowledge'
       ? activeKnowledgeCard
-        ? `knowledge/${activeKnowledgeCard.slug}.yaml`
-        : 'knowledge/cards'
+        ? `knowledge/wiki/${knowledgeTypeDirectories[activeKnowledgeCard.type]}/${activeKnowledgeCard.slug}.md`
+        : 'knowledge/wiki'
       : mode === 'qa'
         ? activeSession?.sessionName ?? '会话'
         : activeFile

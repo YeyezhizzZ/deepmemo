@@ -317,7 +317,10 @@ function KnowledgeReader({
                   <div className="knowledge-reader-v3__sources">
                     {section.sources.map((source) => (
                       <span key={`${section.cardSlug}-${source.path}-${source.evidence}`}>
-                        {source.path} · {Math.round(source.confidence * 100)}%
+                        {source.path}
+                        {source.start_line > 0 ? ` · L${source.start_line}-${source.end_line}` : ''}
+                        {' · '}
+                        {Math.round(source.confidence * 100)}%
                       </span>
                     ))}
                   </div>
@@ -329,7 +332,7 @@ function KnowledgeReader({
           <div className="knowledge-empty">
             <BookOpen size={24} />
             <strong>HTML Reader</strong>
-            <span>从 Knowledge Cards 渲染结构化人类阅读界面</span>
+            <span>从可追溯 Wiki Pages 渲染结构化人类阅读界面</span>
           </div>
         )}
       </article>
@@ -549,7 +552,7 @@ function KnowledgeCards({
     return (
       <div className="knowledge-empty">
         <Database size={24} />
-        <strong>Knowledge Cards</strong>
+        <strong>Wiki Pages</strong>
         <span>{cards.length} cards indexed</span>
       </div>
     );

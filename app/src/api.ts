@@ -149,6 +149,12 @@ function mapKnowledgeCard(card: ApiKnowledgeCard): KnowledgeCard {
     stalenessScore: card.staleness_score,
     humanEdited: card.human_edited,
     humanEditedFields: card.human_edited_fields,
+    confidence: card.confidence,
+    provenanceState: card.provenance_state,
+    contradictedBy: card.contradicted_by,
+    orphaned: card.orphaned,
+    modelId: card.model_id,
+    promptVersion: card.prompt_version,
   };
 }
 
@@ -496,8 +502,26 @@ export async function updateKnowledgeCard(slug: string, updates: Partial<Pick<Kn
   return mapKnowledgeCard(response);
 }
 
-export async function compileKnowledge(): Promise<{ card_slugs: string[]; compiled_files: string[] }> {
-  return request<{ card_slugs: string[]; compiled_files: string[] }>('/api/knowledge/compile', { method: 'POST' });
+export async function compileKnowledge(): Promise<{
+  card_slugs: string[];
+  compiled_files: string[];
+  skipped_files: string[];
+  deleted_files: string[];
+  candidate_ids: string[];
+  warnings: string[];
+  errors: string[];
+  prompt_version: string;
+}> {
+  return request<{
+    card_slugs: string[];
+    compiled_files: string[];
+    skipped_files: string[];
+    deleted_files: string[];
+    candidate_ids: string[];
+    warnings: string[];
+    errors: string[];
+    prompt_version: string;
+  }>('/api/knowledge/compile', { method: 'POST' });
 }
 
 export async function maintainKnowledge(): Promise<KnowledgeHealth> {

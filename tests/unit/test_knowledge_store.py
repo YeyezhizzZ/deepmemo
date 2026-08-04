@@ -25,7 +25,14 @@ def test_store_saves_loads_lists_filters_and_indexes_cards(tmp_path: Path):
 
     loaded = store.load("agentic-testing")
     assert loaded.title == "Agentic Testing"
-    assert (tmp_path / "data" / "knowledge" / "cards" / "agentic-testing.yaml").exists()
+    assert (
+        tmp_path
+        / "data"
+        / "knowledge"
+        / "wiki"
+        / "concepts"
+        / "agentic-testing.md"
+    ).exists()
 
     assert [card.slug for card in store.list_cards(card_type="concept", tag="testing")] == ["agentic-testing"]
 

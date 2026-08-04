@@ -8,7 +8,11 @@ from pathlib import Path
 
 import yaml
 
+from src.knowledge.atomic_io import atomic_write_json, atomic_write_text
 from src.knowledge.models import CardIndex, CardIndexEntry, KnowledgeCard
+from src.knowledge.relation_store import RelationStore
+from src.knowledge.source_store import SourceStore
+from src.knowledge.wiki_store import WikiStore
 
 
 DATA_DIR = Path(os.getenv("DEEPMEMO_DATA_DIR", Path(__file__).resolve().parents[2] / "data"))
@@ -19,36 +23,28 @@ class CardStore:
     def __init__(self, data_dir: str | Path | None = None):
         self.data_dir = Path(data_dir) if data_dir else DATA_DIR
         self.knowledge_dir = self.data_dir / "knowledge"
-        self.cards_dir = self.knowledge_dir / "cards"
+        self.wiki_store = WikiStore(self.data_dir)
+        self.source_store = SourceStore(self.data_dir)
+        self.relation_store = RelationStore(self.data_dir)
+        # Compatibility alias for callers that only need the storage root.
+        self.cards_dir = self.wiki_store.wiki_dir
         self.index_path = self.knowledge_dir / "index.json"
+        self.markdown_index_path = self.knowledge_dir / "index.md"
 
     def save(self, card: KnowledgeCard, *, rebuild_index: bool = True) -> KnowledgeCard:
         self._validate_slug(card.slug)
-        self.cards_dir.mkdir(parents=True, exist_ok=True)
-        path = self.card_path(card.slug)
-        with path.open("w", encoding="utf-8") as handle:
-            yaml.safe_dump(card.to_dict(), handle, allow_unicode=True, sort_keys=False)
+        self.wiki_store.save_card(card)
         if rebuild_index:
             self.rebuild_index()
         return card
 
     def load(self, slug: str) -> KnowledgeCard | None:
         self._validate_slug(slug)
-        path = self.card_path(slug)
-        if not path.exists():
-            return None
-        with path.open("r", encoding="utf-8") as handle:
-            data = yaml.safe_load(handle) or {}
-        return KnowledgeCard.from_dict(data)
+        return self.wiki_store.load_card(slug)
 
     def list_cards(self, *, card_type: str | None = None, tag: str | None = None) -> list[KnowledgeCard]:
-        if not self.cards_dir.exists():
-            return []
         cards: list[KnowledgeCard] = []
-        for path in sorted(self.cards_dir.glob("*.yaml")):
-            card = self.load(path.stem)
-            if card is None:
-                continue
+        for card in self.wiki_store.list_cards():
             if card_type and card.type != card_type:
                 continue
             if tag and tag not in card.tags:
@@ -58,16 +54,14 @@ class CardStore:
 
     def delete(self, slug: str) -> bool:
         self._validate_slug(slug)
-        path = self.card_path(slug)
-        if not path.exists():
+        if not self.wiki_store.delete_card(slug):
             return False
-        path.unlink()
         self.rebuild_index()
         return True
 
     def card_path(self, slug: str) -> Path:
         self._validate_slug(slug)
-        return self.cards_dir / f"{slug}.yaml"
+        return self.wiki_store.find_page_path(slug) or self.wiki_store.page_path(slug, "concept")
 
     def load_index(self) -> CardIndex:
         if not self.index_path.exists():
@@ -118,36 +112,33 @@ class CardStore:
             stats=stats,
             updated_at=datetime.now(timezone.utc).replace(microsecond=0).isoformat(),
         )
-        self.knowledge_dir.mkdir(parents=True, exist_ok=True)
-        with self.index_path.open("w", encoding="utf-8") as handle:
-            json.dump(index.to_dict(), handle, ensure_ascii=False, indent=2)
+        atomic_write_json(self.index_path, index.to_dict())
+        atomic_write_text(self.markdown_index_path, self._render_markdown_index(cards))
+        self.relation_store.rebuild(cards)
         return index
 
     def resolve_source_path(self, value: str | Path, *, must_exist: bool = True) -> Path:
-        raw = Path(value)
-        if raw.is_absolute():
-            candidate = raw.resolve()
-        else:
-            normalized = str(value).strip().replace("\\", "/")
-            while normalized.startswith("./"):
-                normalized = normalized[2:]
-            if normalized.startswith("data/"):
-                normalized = normalized[len("data/") :]
-            candidate = (self.data_dir / normalized).resolve()
-
-        data_root = self.data_dir.resolve()
-        try:
-            candidate.relative_to(data_root)
-        except ValueError as exc:
-            raise ValueError("source path escapes data directory") from exc
-        if candidate.suffix.lower() != ".md":
-            raise ValueError("knowledge compiler only accepts Markdown files")
-        if must_exist and not candidate.exists():
-            raise FileNotFoundError(candidate)
-        return candidate
+        return self.source_store.resolve_origin_path(value, must_exist=must_exist)
 
     def relative_path(self, path: str | Path) -> str:
         return Path(path).resolve().relative_to(self.data_dir.resolve()).as_posix()
+
+    def migrate_legacy_cards(self) -> dict[str, list[str]]:
+        legacy_dir = self.knowledge_dir / "cards"
+        migrated: list[str] = []
+        skipped: list[str] = []
+        if not legacy_dir.exists():
+            return {"migrated": migrated, "skipped": skipped}
+        for path in sorted(legacy_dir.glob("*.yaml")):
+            with path.open(encoding="utf-8") as handle:
+                card = KnowledgeCard.from_dict(yaml.safe_load(handle) or {})
+            if self.load(card.slug) is not None:
+                skipped.append(card.slug)
+                continue
+            self.wiki_store.save_card(card)
+            migrated.append(card.slug)
+        self.rebuild_index()
+        return {"migrated": migrated, "skipped": skipped}
 
     def _key_terms(self, card: KnowledgeCard) -> list[str]:
         values = [card.slug, card.title, *card.tags, *card.aliases, *card.key_facts]
@@ -164,3 +155,22 @@ class CardStore:
     def _validate_slug(self, slug: str) -> None:
         if not _SLUG_RE.match(slug):
             raise ValueError(f"Invalid card slug: {slug}")
+
+    def _render_markdown_index(self, cards: list[KnowledgeCard]) -> str:
+        lines = [
+            "# Knowledge Index",
+            "",
+            "Generated from reviewed Wiki pages. Edit pages, not this index.",
+            "",
+        ]
+        grouped: dict[str, list[KnowledgeCard]] = defaultdict(list)
+        for card in cards:
+            grouped[card.type].append(card)
+        for card_type in sorted(grouped):
+            lines.extend([f"## {card_type.title()}s", ""])
+            for card in sorted(grouped[card_type], key=lambda item: item.title.lower()):
+                path = self.wiki_store.relative_page_path(card.slug)
+                relative = Path(path).relative_to("knowledge").with_suffix("").as_posix()
+                lines.append(f"- [[{relative}|{card.title}]] — {card.definition}")
+            lines.append("")
+        return "\n".join(lines).rstrip() + "\n"

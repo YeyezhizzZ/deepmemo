@@ -145,13 +145,17 @@ export type EvidenceSource = {
   path: string;
   evidence: string;
   confidence: number;
+  source_id: string;
+  source_hash: string;
+  start_line: number;
+  end_line: number;
 };
 
 export type KnowledgeCard = {
   id: string;
   slug: string;
   title: string;
-  type: 'entity' | 'concept' | 'decision' | 'pattern' | 'lesson';
+  type: 'source' | 'entity' | 'concept' | 'decision' | 'pattern' | 'lesson' | 'synthesis' | 'query';
   density: 'high' | 'medium' | 'low';
   definition: string;
   keyFacts: string[];
@@ -165,6 +169,12 @@ export type KnowledgeCard = {
   stalenessScore: number;
   humanEdited: boolean;
   humanEditedFields: string[];
+  confidence: number;
+  provenanceState: 'extracted' | 'merged' | 'inferred' | 'ambiguous' | 'human';
+  contradictedBy: string[];
+  orphaned: boolean;
+  modelId: string;
+  promptVersion: string;
 };
 
 export type KnowledgeHealth = {
@@ -237,7 +247,14 @@ export type KnowledgeCardSummary = {
 
 export type KnowledgeReviewItem = {
   id: string;
-  kind: 'new_card' | 'changed_card' | 'stale_card' | 'conflict' | 'merge_suggestion' | 'repowiki_section';
+  kind:
+    | 'compile_candidate'
+    | 'new_card'
+    | 'changed_card'
+    | 'stale_card'
+    | 'conflict'
+    | 'merge_suggestion'
+    | 'repowiki_section';
   severity: 'high' | 'medium' | 'low';
   title: string;
   summary: string;
@@ -265,7 +282,8 @@ export type KnowledgeRelationNode = {
 export type KnowledgeRelationEdge = {
   from: string;
   to: string;
-  reason: 'related_card' | 'shared_tag' | 'shared_source';
+  reason: 'related_card' | 'contradicts';
+  confidence?: number;
 };
 
 export type KnowledgeRelationGraph = {
@@ -301,6 +319,12 @@ export type ApiKnowledgeCard = {
   staleness_score: number;
   human_edited: boolean;
   human_edited_fields: string[];
+  confidence: number;
+  provenance_state: KnowledgeCard['provenanceState'];
+  contradicted_by: string[];
+  orphaned: boolean;
+  model_id: string;
+  prompt_version: string;
 };
 
 export type ApiRepoWikiPage = {
@@ -374,6 +398,7 @@ export type ApiKnowledgeRelationEdge = {
   from: string;
   to: string;
   reason: KnowledgeRelationEdge['reason'];
+  confidence?: number;
 };
 
 export type ApiKnowledgeViewModel = {

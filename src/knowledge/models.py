@@ -5,8 +5,18 @@ from datetime import datetime, timezone
 from uuid import uuid4
 
 
-CARD_TYPES = {"entity", "concept", "decision", "pattern", "lesson"}
+CARD_TYPES = {
+    "source",
+    "entity",
+    "concept",
+    "decision",
+    "pattern",
+    "lesson",
+    "synthesis",
+    "query",
+}
 CARD_DENSITIES = {"high", "medium", "low"}
+PROVENANCE_STATES = {"extracted", "merged", "inferred", "ambiguous", "human"}
 
 
 def _now_iso() -> str:
@@ -18,16 +28,28 @@ class EvidenceSource:
     path: str
     evidence: str
     confidence: float = 0.5
+    source_id: str = ""
+    source_hash: str = ""
+    start_line: int = 0
+    end_line: int = 0
 
     def __post_init__(self) -> None:
         if not 0.0 <= self.confidence <= 1.0:
             raise ValueError("EvidenceSource confidence must be between 0.0 and 1.0")
+        if self.start_line < 0 or self.end_line < 0:
+            raise ValueError("EvidenceSource line numbers cannot be negative")
+        if self.start_line and self.end_line < self.start_line:
+            raise ValueError("EvidenceSource end_line cannot precede start_line")
 
     def to_dict(self) -> dict:
         return {
             "path": self.path,
             "evidence": self.evidence,
             "confidence": self.confidence,
+            "source_id": self.source_id,
+            "source_hash": self.source_hash,
+            "start_line": self.start_line,
+            "end_line": self.end_line,
         }
 
     @classmethod
@@ -36,6 +58,114 @@ class EvidenceSource:
             path=str(data.get("path", "")),
             evidence=str(data.get("evidence", "")),
             confidence=float(data.get("confidence", 0.5)),
+            source_id=str(data.get("source_id") or ""),
+            source_hash=str(data.get("source_hash") or ""),
+            start_line=int(data.get("start_line") or 0),
+            end_line=int(data.get("end_line") or 0),
+        )
+
+
+@dataclass(frozen=True)
+class SourceSnapshot:
+    source_id: str
+    origin_path: str
+    source_hash: str
+    snapshot_path: str
+    captured_at: str
+    line_count: int
+    source_type: str = "file"
+    truncated: bool = False
+    original_chars: int = 0
+
+    def to_dict(self) -> dict:
+        return {
+            "source_id": self.source_id,
+            "origin_path": self.origin_path,
+            "source_hash": self.source_hash,
+            "snapshot_path": self.snapshot_path,
+            "captured_at": self.captured_at,
+            "line_count": self.line_count,
+            "source_type": self.source_type,
+            "truncated": self.truncated,
+            "original_chars": self.original_chars,
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict) -> "SourceSnapshot":
+        return cls(
+            source_id=str(data["source_id"]),
+            origin_path=str(data["origin_path"]),
+            source_hash=str(data["source_hash"]),
+            snapshot_path=str(data["snapshot_path"]),
+            captured_at=str(data["captured_at"]),
+            line_count=int(data["line_count"]),
+            source_type=str(data.get("source_type") or "file"),
+            truncated=bool(data.get("truncated") or False),
+            original_chars=int(data.get("original_chars") or 0),
+        )
+
+
+@dataclass
+class ExtractedKnowledge:
+    slug: str
+    title: str
+    type: str
+    summary: str
+    key_facts: list[str]
+    citations: list[EvidenceSource]
+    tags: list[str] = field(default_factory=list)
+    aliases: list[str] = field(default_factory=list)
+    related_cards: list[str] = field(default_factory=list)
+    confidence: float = 0.5
+    provenance_state: str = "extracted"
+    contradicted_by: list[str] = field(default_factory=list)
+
+    def __post_init__(self) -> None:
+        if self.type not in CARD_TYPES:
+            raise ValueError(f"Unsupported extracted knowledge type: {self.type}")
+        if not 0.0 <= self.confidence <= 1.0:
+            raise ValueError("Extracted knowledge confidence must be between 0.0 and 1.0")
+        if self.provenance_state not in PROVENANCE_STATES:
+            raise ValueError(f"Unsupported provenance state: {self.provenance_state}")
+        self.key_facts = _dedupe_strings(self.key_facts)
+        self.tags = sorted(_dedupe_strings(self.tags))
+        self.aliases = _dedupe_strings(self.aliases)
+        self.related_cards = _dedupe_strings(self.related_cards)
+        self.contradicted_by = _dedupe_strings(self.contradicted_by)
+
+    def to_dict(self) -> dict:
+        return {
+            "slug": self.slug,
+            "title": self.title,
+            "type": self.type,
+            "summary": self.summary,
+            "key_facts": list(self.key_facts),
+            "citations": [citation.to_dict() for citation in self.citations],
+            "tags": list(self.tags),
+            "aliases": list(self.aliases),
+            "related_cards": list(self.related_cards),
+            "confidence": self.confidence,
+            "provenance_state": self.provenance_state,
+            "contradicted_by": list(self.contradicted_by),
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict) -> "ExtractedKnowledge":
+        return cls(
+            slug=str(data.get("slug") or ""),
+            title=str(data.get("title") or ""),
+            type=str(data.get("type") or "concept"),
+            summary=str(data.get("summary") or ""),
+            key_facts=list(data.get("key_facts") or []),
+            citations=[
+                EvidenceSource.from_dict(item) for item in data.get("citations") or []
+            ],
+            tags=list(data.get("tags") or []),
+            aliases=list(data.get("aliases") or []),
+            related_cards=list(data.get("related_cards") or []),
+            confidence=float(data.get("confidence", 0.5)),
+            provenance_state=str(data.get("provenance_state") or "extracted"),
+            contradicted_by=list(data.get("contradicted_by") or []),
         )
 
 
@@ -58,12 +188,22 @@ class KnowledgeCard:
     staleness_score: float = 0.0
     human_edited: bool = False
     human_edited_fields: list[str] = field(default_factory=list)
+    confidence: float = 0.5
+    provenance_state: str = "extracted"
+    contradicted_by: list[str] = field(default_factory=list)
+    orphaned: bool = False
+    model_id: str = ""
+    prompt_version: str = ""
 
     def __post_init__(self) -> None:
         if self.type not in CARD_TYPES:
             raise ValueError(f"Unsupported card type: {self.type}")
         if self.density not in CARD_DENSITIES:
             raise ValueError(f"Unsupported density: {self.density}")
+        if not 0.0 <= self.confidence <= 1.0:
+            raise ValueError("KnowledgeCard confidence must be between 0.0 and 1.0")
+        if self.provenance_state not in PROVENANCE_STATES:
+            raise ValueError(f"Unsupported provenance state: {self.provenance_state}")
         if not self.id:
             self.id = f"kc-{uuid4().hex[:8]}"
         now = _now_iso()
@@ -76,6 +216,7 @@ class KnowledgeCard:
         self.tags = sorted(_dedupe_strings(self.tags))
         self.aliases = _dedupe_strings(self.aliases)
         self.human_edited_fields = _dedupe_strings(self.human_edited_fields)
+        self.contradicted_by = _dedupe_strings(self.contradicted_by)
 
     def to_dict(self) -> dict:
         return {
@@ -96,6 +237,12 @@ class KnowledgeCard:
             "staleness_score": self.staleness_score,
             "human_edited": self.human_edited,
             "human_edited_fields": list(self.human_edited_fields),
+            "confidence": self.confidence,
+            "provenance_state": self.provenance_state,
+            "contradicted_by": list(self.contradicted_by),
+            "orphaned": self.orphaned,
+            "model_id": self.model_id,
+            "prompt_version": self.prompt_version,
         }
 
     @classmethod
@@ -118,6 +265,12 @@ class KnowledgeCard:
             staleness_score=float(data.get("staleness_score") or 0.0),
             human_edited=bool(data.get("human_edited") or False),
             human_edited_fields=list(data.get("human_edited_fields") or []),
+            confidence=float(data.get("confidence", 0.5)),
+            provenance_state=str(data.get("provenance_state") or "extracted"),
+            contradicted_by=list(data.get("contradicted_by") or []),
+            orphaned=bool(data.get("orphaned") or False),
+            model_id=str(data.get("model_id") or ""),
+            prompt_version=str(data.get("prompt_version") or ""),
         )
 
 
@@ -194,14 +347,22 @@ class CompileResult:
     compiled_files: list[str] = field(default_factory=list)
     card_slugs: list[str] = field(default_factory=list)
     skipped_files: list[str] = field(default_factory=list)
+    deleted_files: list[str] = field(default_factory=list)
+    candidate_ids: list[str] = field(default_factory=list)
     warnings: list[str] = field(default_factory=list)
+    errors: list[str] = field(default_factory=list)
+    prompt_version: str = ""
 
     def to_dict(self) -> dict:
         return {
             "compiled_files": list(self.compiled_files),
             "card_slugs": list(self.card_slugs),
             "skipped_files": list(self.skipped_files),
+            "deleted_files": list(self.deleted_files),
+            "candidate_ids": list(self.candidate_ids),
             "warnings": list(self.warnings),
+            "errors": list(self.errors),
+            "prompt_version": self.prompt_version,
         }
 
 

@@ -27,6 +27,8 @@ import src.knowledge.maintenance as knowledge_maintenance
 import src.knowledge.repowiki as knowledge_repowiki
 import src.knowledge.view_model as knowledge_view_model
 from src.app.database import init_db
+from src.knowledge.card_compiler import KnowledgeCardCompiler
+from tests.fake_knowledge_provider import FakeKnowledgeProvider
 
 
 @pytest.fixture(autouse=True)
@@ -52,9 +54,18 @@ def isolated_app_state(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setattr(knowledge_maintenance, "DATA_DIR", data_dir)
     monkeypatch.setattr(knowledge_repowiki, "DATA_DIR", data_dir)
     monkeypatch.setattr(knowledge_view_model, "DATA_DIR", data_dir)
+    provider = FakeKnowledgeProvider()
+    monkeypatch.setattr(
+        knowledge_router,
+        "_compiler",
+        lambda: KnowledgeCardCompiler(
+            data_dir=knowledge_router.DATA_DIR,
+            provider=provider,
+        ),
+    )
 
     init_db()
-    return SimpleNamespace(data_dir=data_dir, db_path=db_path)
+    return SimpleNamespace(data_dir=data_dir, db_path=db_path, provider=provider)
 
 
 @pytest.fixture
@@ -70,6 +81,11 @@ def db_path(isolated_app_state) -> Path:
 @pytest.fixture
 def test_data_dir(isolated_app_state) -> Path:
     return isolated_app_state.data_dir
+
+
+@pytest.fixture
+def fake_knowledge_provider(isolated_app_state) -> FakeKnowledgeProvider:
+    return isolated_app_state.provider
 
 
 @pytest.fixture

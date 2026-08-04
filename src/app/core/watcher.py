@@ -24,10 +24,25 @@ def compile_knowledge_source(rel_path: str) -> None:
     try:
         from src.knowledge.card_compiler import KnowledgeCardCompiler
 
-        KnowledgeCardCompiler(data_dir=DATA_DIR).compile_file(rel_path)
-        print(f"[Watcher] knowledge compiled: {rel_path}", flush=True)
+        compiler = KnowledgeCardCompiler(data_dir=DATA_DIR)
+        source_path = DATA_DIR / rel_path
+        result = (
+            compiler.compile_file(rel_path)
+            if source_path.is_file()
+            else compiler.compile_all()
+        )
+        if result.errors:
+            print(
+                f"[Watcher] knowledge compile failed for {rel_path}: "
+                f"{'; '.join(result.errors)}",
+                flush=True,
+            )
+        else:
+            print(f"[Watcher] knowledge compiled: {rel_path}", flush=True)
     except Exception as exc:
         print(f"[Watcher] knowledge compile failed for {rel_path}: {exc}", flush=True)
+    finally:
+        _pending_compile_timers.pop(rel_path, None)
 
 
 def schedule_knowledge_compile(rel_path: str, delay_seconds: int | None = None) -> None:

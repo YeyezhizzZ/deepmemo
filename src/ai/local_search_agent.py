@@ -31,7 +31,7 @@ class LocalSearchAgent:
                 question=question,
                 evidence=card_evidence[: self.max_evidence],
                 searched_queries=[question],
-                searched_paths=["knowledge/cards"],
+                searched_paths=["knowledge/wiki"],
                 truncated=False,
                 message=None,
             )
