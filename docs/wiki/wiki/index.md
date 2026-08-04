@@ -1,18 +1,15 @@
-# Wiki 导航
+# Legacy Wiki Archive
 
-这里集中放 DeepMemo Wiki 能力相关文档。Wiki 指 `data/wiki/` 中由日记和原始资料编译出的结构化知识层，不是 VitePress 文档站本身。
+> 本目录记录已废弃的 Wiki graph/ingestion 方案，仅供架构回溯。旧 `/wiki/*` 路由、`data/wiki/` 和 Wiki 前端工作区不属于当前产品行为。
 
-## 使用与维护
+当前实现使用 [Knowledge Engine](/specs/current/knowledge-engine)：Knowledge Cards 位于 `data/knowledge/cards/`，受支持的 API 位于 `/api/knowledge/*`。
 
-- [探索 Wiki 图谱](./explore)
-- [重建 Wiki](./rebuild)
-- [Wiki 知识图谱](./graph)
+## 历史材料
 
-## 设计材料
-
+- [旧版探索流程](./explore)
+- [旧版重建流程](./rebuild)
+- [旧版知识图谱](./graph)
 - [LLM Wiki 架构设计](./design)
 - [阶段性思考记录](./notes)
 
-## 与 Spec 的关系
-
-本目录解释 Wiki 如何使用和为什么这样设计。权威行为边界仍以 `docs/specs/current/wiki-graph.md` 和 `docs/specs/current/wiki-ingestion.md` 为准。
+权威废弃边界见 [Wiki Graph Spec](/specs/current/wiki-graph) 和 [Wiki Ingestion Spec](/specs/current/wiki-ingestion)。

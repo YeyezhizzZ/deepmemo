@@ -15,6 +15,14 @@ uv run python scripts/verify.py --mode quick
 
 ## 完整验证
 
+首次运行浏览器回归前安装 Chromium：
+
+```bash
+cd app
+npx playwright install chromium
+cd ..
+```
+
 ```bash
 uv run python scripts/verify.py --mode full
 ```

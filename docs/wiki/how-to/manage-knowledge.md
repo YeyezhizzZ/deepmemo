@@ -11,9 +11,9 @@ DeepMemo 的知识库根目录是 `data/`，可用 `DEEPMEMO_DATA_DIR` 改写。
 | `data/memory/` | 长期记忆 |
 | `data/raw/` | 抓取材料、原始输入 |
 | `data/mock/` | demo 数据 |
-| `data/wiki/` | 生成 Wiki 页面 |
-| `data/policy/` | Wiki 策略 |
 | `data/assets/` | 图片等附件 |
+| `data/knowledge/cards/` | 从 Markdown 或会话编译的 Knowledge Cards |
+| `data/knowledge/repowiki/` | 从 Cards 生成的只读 RepoWiki |
 
 ## 文件命名
 
@@ -45,4 +45,4 @@ data/ideas/local-first-search.md
 
 ## 前端管理
 
-Editor 模式的文件树支持创建、读取、写入、移动和重命名。Wiki 目录由 LLM 和 Wiki 模块维护，前端编辑模式会过滤掉 `data/wiki`，避免把生成页面和原始知识混在同一个编辑流里。
+Editor 模式的文件树支持创建、读取、写入、移动和重命名。`data/knowledge/` 由 Knowledge Engine 维护，建议通过 Knowledge 工作区、`/api/knowledge/*` 或 `src.knowledge.cli` 操作，不要把派生产物当成来源 Markdown 手工维护。

@@ -6,6 +6,17 @@ const apiProxyTarget = process.env.DEEPMEMO_API_PROXY_TARGET ?? 'http://localhos
 export default defineConfig({
   plugins: [react()],
   publicDir: 'public',
+  build: {
+    rollupOptions: {
+      output: {
+        manualChunks: {
+          icons: ['lucide-react'],
+          react: ['react', 'react-dom'],
+          vditor: ['vditor'],
+        },
+      },
+    },
+  },
   server: {
     host: '127.0.0.1',
     port: 5173,

@@ -19,7 +19,7 @@ DeepMemo/
 
 - Editor：文件树、Vditor 所见即所得编辑器、保存和 assets 上传。
 - QA：会话列表、聊天输入、SSE 流式回答、引用跳转。
-- Wiki：社区图谱、节点详情、Wiki 页面搜索、重建按钮。
+- Knowledge：Overview、Reader、Review、Cards 和关系画布。
 
 重要文件：
 
@@ -38,10 +38,10 @@ DeepMemo/
 | `src/app/main.py` | FastAPI app、routers、startup/shutdown |
 | `src/app/database.py` | SQLite 初始化 |
 | `src/app/core/` | 文件、assets、watcher 等核心服务 |
-| `src/routers/` | FS、chat、wiki、pulse、citations 等路由 |
+| `src/routers/` | FS、chat、knowledge、pulse、citations 等路由 |
 | `src/ai/` | RAG、query routing、local/web search、answer composer |
 | `src/models/` | Pydantic schemas |
-| `src/wiki/` | Wiki ingest、graph、health、frontmatter、storage |
+| `src/knowledge/` | Card 编译、存储、维护、检索、ViewModel 和 RepoWiki |
 
 ## `data/`
 
@@ -52,9 +52,9 @@ DeepMemo/
 | `data/memory/` | 长期记忆 |
 | `data/raw/` | 原始抓取或输入材料 |
 | `data/mock/` | 公开 demo 数据 |
-| `data/policy/` | Wiki 策略包 |
 | `data/assets/` | 上传图片 |
-| `data/wiki/` | 生成的 Wiki 页面 |
+| `data/knowledge/cards/` | 编译生成的 Knowledge Cards |
+| `data/knowledge/repowiki/` | 从 Cards 生成的只读 RepoWiki |
 
 ## `docs/`
 

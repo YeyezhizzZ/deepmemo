@@ -1,0 +1,8 @@
+llm:
+  use: openai_compatible
+  openai_compatible:
+    api_key: "replace-with-your-api-key"
+    api_base: "https://api.example.com/v1"
+    model: "your-model-name"
+    max_tokens: 1200
+    temperature: 0.7

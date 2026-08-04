@@ -6,6 +6,8 @@
 |:---|:---|:---|
 | `DEEPMEMO_DATA_DIR` | `data/` | 知识库根目录 |
 | `DEEPMEMO_DB_PATH` | `data.db` | SQLite 数据库路径 |
+| `DEEPMEMO_LLM_CONFIG` | `config/llm_api.yaml` | LLM YAML 配置路径 |
+| `DEEPMEMO_KNOWLEDGE_USE_LLM` | `0` | 设为 `1` 时允许 Card 编译使用 LLM，失败时回退启发式提取 |
 | `DEEPMEMO_WATCHER_MODE` | 空 | 设置为 `polling` 时使用 polling watcher |
 | `DEEPMEMO_API_PROXY_TARGET` | `http://localhost:8000` | Vite 开发代理目标 |
 | `VITE_API_BASE_URL` | `/api` | 前端运行时 API base URL |
@@ -35,7 +37,7 @@ siliconflow:
   model: "deepseek-ai/DeepSeek-V3"
 ```
 
-字段由 `src/services/llm_service.py` 读取。当前实现使用 OpenAI SDK，因此 provider 需要提供 OpenAI-compatible 的 `api_base`。
+字段由 `src/services/llm_service.py` 在首次 LLM 调用时读取。当前实现使用 OpenAI SDK，因此 provider 需要提供 OpenAI-compatible 的 `api_base`。缺少该文件不影响编辑器、Knowledge 工作区和无网络测试。
 
 ## `config/web_search.yaml`
 
@@ -68,6 +70,6 @@ tavily:
 
 Wiki ingest 和 merger 会读取该文件中的 prompt。文件不存在或为空时，相关模块会使用空 system prompt 并输出 warning。
 
-## `data/policy/`
+## `data/knowledge/`
 
-策略文件由 `/wiki/policy` 暴露给前端，用于约束 Wiki 页面类型、命名、关系和生成偏好。它属于知识库数据的一部分，不是应用行为代码。
+Knowledge Engine 将 Cards、索引、审阅状态和 RepoWiki 写入 `data/knowledge/`。它们是本地知识库的派生产物；旧 `/wiki/*` API 和 `data/wiki/` 不再属于当前产品接口。

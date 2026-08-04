@@ -273,10 +273,18 @@ function VditorMarkdownEditor({
   useEffect(() => {
     if (!mountRef.current) return undefined;
 
+    let isReady = false;
+    let isDisposed = false;
+    const testHook: BrowserTestEditorHook = {
+      setEditorMarkdown: (nextValue: string) => {
+        onChangeRef.current(nextValue);
+      },
+      getEditorMarkdown: () => editor.getValue(),
+    };
     const editor = new Vditor(mountRef.current, {
       value,
       mode: 'wysiwyg',
-      cdn: '/vditor',          // 从本地 public/vditor 加载资源，避免依赖 unpkg CDN
+      cdn: '/vditor',
       height: '100%',
       minHeight: 0,
       placeholder: 'Markdown',
@@ -309,24 +317,30 @@ function VditorMarkdownEditor({
         }
       },
       after: () => {
+        isReady = true;
+        if (isDisposed) {
+          editor.destroy();
+          return;
+        }
+
         editorRef.current = editor;
+        const latestValue = formatEditorMarkdown(latestValueRef.current);
+        if (latestValue !== formatEditorMarkdown(value)) {
+          editor.setValue(latestValue, true);
+        }
+        if (typeof window !== 'undefined') {
+          window.__DEEPMEMO_TEST__ = window.__DEEPMEMO_TEST__ ?? {};
+          window.__DEEPMEMO_TEST__.editor = testHook;
+        }
       },
     });
 
-    editorRef.current = editor;
-    if (typeof window !== 'undefined') {
-      window.__DEEPMEMO_TEST__ = window.__DEEPMEMO_TEST__ ?? {};
-      window.__DEEPMEMO_TEST__.editor = {
-        setEditorMarkdown: (nextValue: string) => {
-          onChangeRef.current(nextValue);
-        },
-        getEditorMarkdown: () => editor.getValue(),
-      };
-    }
-
     return () => {
-      editor.destroy();
-      if (typeof window !== 'undefined' && window.__DEEPMEMO_TEST__?.editor?.getEditorMarkdown() === editor.getValue()) {
+      isDisposed = true;
+      if (isReady) {
+        editor.destroy();
+      }
+      if (typeof window !== 'undefined' && window.__DEEPMEMO_TEST__?.editor === testHook) {
         delete window.__DEEPMEMO_TEST__.editor;
       }
       if (editorRef.current === editor) {
@@ -337,15 +351,11 @@ function VditorMarkdownEditor({
 
   useEffect(() => {
     const editor = editorRef.current;
-    if (!editor || latestValueRef.current === value) return;
+    if (latestValueRef.current === value) return;
     latestValueRef.current = value;
-    const normalized = value
-      .split('\n')
-      .map((line) => line.trimEnd())
-      .join('\n')
-      .replace(/\n{3,}/g, '\n\n')
-      .trimStart();
-    editor.setValue(normalized, true);
+    if (editor) {
+      editor.setValue(formatEditorMarkdown(value), true);
+    }
   }, [value]);
 
   return <div className="vditor-editor-host" data-testid="markdown-editor" ref={mountRef} />;

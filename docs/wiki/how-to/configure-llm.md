@@ -1,6 +1,12 @@
 # 配置 LLM API
 
-DeepMemo 的 LLM 配置文件是 `config/llm_api.yaml`，由 `src/services/llm_service.py` 读取。
+DeepMemo 默认从 `config/llm_api.yaml` 读取 LLM 配置。先复制不含真实密钥的模板：
+
+```bash
+cp config/example.yaml config/llm_api.yaml
+```
+
+也可以通过 `DEEPMEMO_LLM_CONFIG` 指向其他 YAML 文件。LLM 客户端采用延迟初始化，因此编辑器、Knowledge 工作区和测试在没有该文件时仍可运行。
 
 ## 推荐格式
 
@@ -62,4 +68,4 @@ provider: "disabled"
 uv run uvicorn src.app.main:app --reload
 ```
 
-再打开前端提问。若 LLM 配置缺少 `llm.use` 或 provider 字段，后端会在初始化服务时抛出明确错误。
+再打开前端提问。首次调用 LLM 时，若配置不存在、无法解析或缺少必填字段，回答会返回明确的配置错误。

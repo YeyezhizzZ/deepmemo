@@ -16,7 +16,6 @@ import yaml
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 APP_ROOT = REPO_ROOT / "app"
-PYTHON_BIN = REPO_ROOT / ".venv" / "bin" / "python3.11"
 BACKEND_URL = "http://127.0.0.1:8000/"
 FRONTEND_URL = "http://127.0.0.1:5173/"
 SCENARIOS_PATH = APP_ROOT / "tests/browser/scenarios.yaml"
@@ -98,7 +97,7 @@ def pick_free_port() -> int:
 
 
 def main() -> int:
-    python_bin = PYTHON_BIN if PYTHON_BIN.exists() else Path(sys.executable)
+    python_bin = Path(sys.executable)
     dataset = load_active_dataset()
     data_dir, db_path = prepare_workspace(dataset)
     backend_port = pick_free_port()

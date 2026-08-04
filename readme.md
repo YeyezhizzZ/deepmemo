@@ -4,7 +4,7 @@
 
 **本地优先的 Markdown 知识库创作与问答工作台**
 
-不要高估一天的产出，也不要小看一周的积淀。DeepMemo 帮你把每天零散的学习记录、工程经验、研究想法和灵感片段，沉淀成可编辑、可检索、可追溯的个人知识系统。
+不要高估一天的产出，也不要小看一周的积淀。DeepMemo 帮你把零散记录沉淀成可编辑、可检索、可追溯的个人知识系统，并通过 Editor、QA、Knowledge 三个工作区连接创作、问答和知识整理。
 
 ![Python](https://img.shields.io/badge/Python-3.11+-3776AB?style=flat-square&logo=python&logoColor=white)
 ![FastAPI](https://img.shields.io/badge/FastAPI-0.110+-009688?style=flat-square&logo=fastapi&logoColor=white)
@@ -30,10 +30,10 @@ AI 时代的信息流像多线程任务一样不断抢占注意力：课程、�
 
 ## Screenshots
 <p align="center">
-  <img src="docx/screenshots/editor-mode.png" alt="DeepMemo Editor Mode" width="850" />
+  <img src="docs/design/screenshots/editor-mode.png" alt="DeepMemo Editor Mode" width="850" />
 </p>
 <p align="center">
-  <img src="docx/screenshots/qa-mode.png" alt="DeepMemo Q&A Mode" width="850" />
+  <img src="docs/design/screenshots/qa-mode.png" alt="DeepMemo Q&A Mode" width="850" />
 </p>
 
 ---
@@ -44,6 +44,7 @@ AI 时代的信息流像多线程任务一样不断抢占注意力：课程、�
 
 - 左侧 Data Explorer 直接映射本地 `data/` 目录。
 - 支持读取、创建、保存 Markdown 文件和创建文件夹。
+- 使用 Vditor 提供所见即所得编辑，并支持 `Ctrl/Cmd + S` 保存。
 - 文件状态使用 `synced`、`dirty`、`draft`、`processing`、`error` 标记，便于区分本地变更状态。
 - 内置基础格式化和面向当前文档的 AI 补完入口。
 
@@ -53,10 +54,17 @@ AI 时代的信息流像多线程任务一样不断抢占注意力：课程、�
 - 回答正文中的 `[1]`、`[2]` 引用会绑定到具体文件片段，右侧 Source Panel 可查看原文上下文。
 - 支持查询引用了当前文件的历史会话，方便从文件回到对话。
 
+### Knowledge Engine
+
+- 将 Markdown 和会话增量编译为可审阅的 Knowledge Cards。
+- 提供 Overview、Reader、Review、Cards 四种知识视图。
+- 支持卡片维护、人工字段保护、关系浏览和 RepoWiki 重建。
+
 ### 可选的外部信息补充
 
 - WebSearchAgent 默认关闭，只有配置后才会在本地证据不足且问题依赖外部实时信息时 fallback。
 - 回答侧会区分本地知识库证据和外部搜索补充，避免把外部信息误认为个人记录。
+
 ---
 
 ## Demo Data
@@ -66,7 +74,7 @@ AI 时代的信息流像多线程任务一样不断抢占注意力：课程、�
 - `data/mock/example1.md`：DeepMemo 的产品定位和问答流程示例。
 - `data/mock/example2.md`：AI 时代个人多线程学习和记录压力的案例故事。
 
-真实个人知识库会被 `.gitignore` 忽略，只有 `data/mock/` 会进入 Git。启动后可以在问答模式尝试：
+真实个人知识库会被 `.gitignore` 忽略，只有 `data/mock/` 会进入 Git。启动后可以在问答模式尝试“DeepMemo 如何保证回答可追溯？”。
 
 ---
 
@@ -83,38 +91,45 @@ AI 时代的信息流像多线程任务一样不断抢占注意力：课程、�
 
 ```bash
 git clone https://github.com/YeyezhizzZ/deepmemo.git
-cd DeepMemo
+cd deepmemo
 
-uv sync
+uv sync --all-groups
 
 cd app
-npm install
+npm ci
 cd ..
 ```
 
 ### 2. Configure LLM
 
-创建 `config/llm_api.yaml`。该文件已被 `.gitignore` 忽略，不要提交真实 API Key。
+仅编辑、浏览 Knowledge 和运行测试时不需要 LLM 配置。使用 QA 或 AI 补完前，从示例创建本地配置；该文件已被 `.gitignore` 忽略。
 
-```yaml
-model_provider:
-  api_key: "sk-..."
-  api_base: "https:..."
-  model: "model_name"
-  max_tokens: 1000
-  temperature: 0.7
+```bash
+cp config/example.yaml config/llm_api.yaml
 ```
 
-`LLMService` 会读取 YAML 中的第一个 provider，因此 provider 名称可以按你的服务商调整，只要保留 `api_key`、`api_base` 和 `model` 字段即可。
+```yaml
+llm:
+  use: openai_compatible
+  openai_compatible:
+    api_key: "replace-with-your-api-key"
+    api_base: "https://api.example.com/v1"
+    model: "your-model-name"
+    max_tokens: 1200
+    temperature: 0.7
+```
+
+`llm.use` 必须指向 `llm` 下的 provider。接口需要兼容 OpenAI Chat Completions。
 
 ### 3. Run
 
-> 所有命令默认从项目根目录 `DeepMemo/` 执行。
+> 所有命令默认从项目根目录 `deepmemo/` 执行。
 
 后端 API，默认端口 `8000`：
 
 ```bash
 uv run uvicorn src.app.main:app --reload
+```
 
 前端应用，默认端口 `5173`：
 
@@ -130,18 +145,20 @@ npm run dev
 ## Project Structure
 
 ```text
-DeepMemo/
+deepmemo/
 ├── app/                    # React + Vite + TypeScript 前端
-│   └── src/
+│   ├── src/
+│   └── tests/browser/      # Playwright 场景
 ├── src/                    # FastAPI 后端
 │   ├── ai/                 # RAG、检索、回答生成、WebSearch fallback
 │   ├── app/                # 应用入口、数据库、文件监听
+│   ├── knowledge/          # Card 编译、维护、检索和 RepoWiki
 │   ├── routers/            # chat、fs、diary、pulse、citations API
 │   └── services/           # LLM provider 封装
-├── data/
-│   └── mock/               # 可公开示例知识库
-├── config/
-│   └── example.yaml        # 配置占位
+├── tests/                  # API、单元和 E2E 测试
+├── docs/                   # specs、设计文档和 VitePress Wiki
+├── data/mock/              # 可公开示例知识库
+└── config/example.yaml     # LLM 配置模板
 ```
 
 ---
@@ -159,6 +176,11 @@ User Question
   -> WebSearchAgent fallback, optional
   -> AnswerComposer
   -> Markdown answer with citations
+
+Markdown / Conversation
+  -> KnowledgeCardCompiler
+  -> data/knowledge/cards
+  -> View Model / Review Queue / RepoWiki
 ```
 
 DeepMemo 当前采用轻量 RAG 思路：先不引入 embedding 和向量数据库，而是使用安全封装的本地搜索工具在 Markdown 文件中召回证据。这样更适合个人 MB 级知识库，也降低了索引维护成本。
@@ -167,11 +189,38 @@ DeepMemo 当前采用轻量 RAG 思路：先不引入 embedding 和向量数据�
 
 ## Tech Stack
 
-- Frontend：React 18、TypeScript、Vite、Lucide React
+- Frontend：React 18、TypeScript、Vite、Vditor、Lucide React
 - Backend：FastAPI、Pydantic、SQLite
 - AI：OpenAI-compatible Chat Completions API
 - Local search：ripgrep + 受控文件读取工具
 - Optional web search：Tavily、Open-WebSearch MCP
+
+---
+
+## Verification
+
+快速回归（API、单元测试和前端构建）：
+
+```bash
+uv run python scripts/verify.py --mode quick
+```
+
+完整回归还需要先安装 Playwright Chromium：
+
+```bash
+cd app
+npx playwright install chromium
+cd ..
+uv run python scripts/verify.py --mode full
+```
+
+文档站：
+
+```bash
+cd docs/wiki
+npm ci
+npm run docs:build
+```
 
 ---
 

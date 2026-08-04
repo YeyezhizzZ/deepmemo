@@ -1,6 +1,7 @@
 import os
 import json
 import uuid
+from contextlib import asynccontextmanager
 from datetime import datetime
 from pathlib import Path
 from fastapi import FastAPI, HTTPException
@@ -20,8 +21,22 @@ from src.routers.chat import router as chat_router
 from src.routers.knowledge import router as knowledge_router
 
 
-app = FastAPI(title="DeepMemo API", version="0.2.0")
 DATA_DIR = Path(os.getenv("DEEPMEMO_DATA_DIR", Path(__file__).resolve().parents[2] / "data"))
+
+
+@asynccontextmanager
+async def lifespan(_: FastAPI):
+    init_db()
+    start_watcher()
+    start_knowledge_scheduler(DATA_DIR)
+    try:
+        yield
+    finally:
+        stop_watcher()
+        stop_knowledge_scheduler()
+
+
+app = FastAPI(title="DeepMemo API", version="0.6.0", lifespan=lifespan)
 app.mount("/assets", StaticFiles(directory=DATA_DIR / "assets", check_dir=False), name="assets")
 
 app.add_middleware(
@@ -126,19 +141,6 @@ def build_llm_messages(session_id: str) -> list[dict]:
             messages.append({"role": role, "content": row["content"]})
     conn.close()
     return messages
-
-
-# --- Startup / Shutdown ---
-@app.on_event("startup")
-def startup():
-    init_db()
-    start_watcher()
-    start_knowledge_scheduler(DATA_DIR)
-
-@app.on_event("shutdown")
-def shutdown():
-    stop_watcher()
-    stop_knowledge_scheduler()
 
 
 # --- FS Routers ---

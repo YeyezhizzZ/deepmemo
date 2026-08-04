@@ -1,6 +1,6 @@
 # Local-first 哲学
 
-DeepMemo 的第一原则是：本地 Markdown 是知识真值。应用可以帮你索引、检索、总结、生成 Wiki、画图谱，但不能把 SQLite、LLM 输出或云服务变成长期知识所有权的中心。
+DeepMemo 的第一原则是：本地 Markdown 是来源真值。应用可以帮你索引、检索、总结和生成 Knowledge Cards，但不能把 SQLite、LLM 输出或云服务变成长期知识所有权的中心。
 
 ## 为什么坚持 Markdown
 
@@ -9,7 +9,7 @@ Markdown 文件有几个朴素但重要的优点：
 - 可以被任何编辑器打开。
 - 可以用 Git、备份软件或普通文件夹同步。
 - 不需要平台账号才能读写。
-- 适合日记、想法、长期记忆、原始资料和生成 Wiki 共存。
+- 适合日记、想法、长期记忆和原始资料共存。
 
 这意味着 DeepMemo 不是把你的知识迁移到另一个封闭系统里，而是在本地文件之上提供工作台。
 
@@ -25,11 +25,11 @@ SQLite 保存的是元数据，而不是知识正文：
 
 知识正文仍在 `data/*.md`。如果数据库损坏，长期知识仍应能从文件恢复。
 
-## Wiki 也是 Markdown
+## Knowledge 产物也是本地文件
 
-Wiki ingest 会把日记等碎片化语料整理为 `data/wiki/` 下的 Markdown 页面。它们是生成结果，但依然是普通文件，可被编辑、备份和检查。
+Knowledge Engine 会把日记等碎片化语料编译为 `data/knowledge/cards/` 下的 YAML Cards，并从 Cards 生成 `data/knowledge/repowiki/` Markdown 页面。它们是派生产物，但仍是可检查和备份的普通本地文件。
 
-这个设计有一个克制点：Wiki 页面不替代原始日记。原文负责事实和语境，Wiki 负责结构化视图。
+这个设计有一个克制点：Cards 和 RepoWiki 不替代原始日记。原文负责事实和语境，Knowledge 层负责结构化视图和人工审阅。
 
 ## 为什么没有默认 Vector DB
 

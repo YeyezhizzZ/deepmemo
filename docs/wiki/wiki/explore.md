@@ -1,36 +1,14 @@
-# 探索 Wiki 图谱
+# 旧版 Wiki 探索流程
 
-Wiki 模式把碎片化日记整理成结构化页面，并用图谱展示实体、概念和综合观点之间的关系。
+> **已废弃**：本页描述的 Wiki 工作区、`/wiki/rebuild` 和图谱浏览流程已从主应用移除，不可作为操作手册使用。
 
-## 打开 Wiki 模式
+旧方案把 `data/wiki/` 页面建模为 `source`、`entity`、`concept`、`synthesis` 和 `query` 节点，并基于直接链接、来源交集、Adamic-Adar 与 Louvain 社区检测构图。相关内容保留用于解释早期技术取舍。
 
-进入 `Wiki` 模式。左侧是 Wiki 页面列表和操作区，主区域显示社区图谱，右侧显示节点详情。
+当前界面请使用 `Knowledge` 工作区：
 
-## 重建 Wiki
+- `Overview` 查看统计和关系概览。
+- `Reader` 阅读由 Cards 生成的页面。
+- `Review` 处理确认、隐藏和重写建议。
+- `Cards` 编辑受保护的结构化知识。
 
-点击 `重建 Wiki`。前端会调用：
-
-```http
-POST /wiki/rebuild
-```
-
-默认请求体相当于：
-
-```json
-{ "clean": false }
-```
-
-## 等待 ingest
-
-重建流程会遍历源 Markdown，检查 MD5 和 registry 缓存。变更文件进入两阶段 LLM 处理：
-
-1. Analysis：提取实体、概念、综合、矛盾等结构。
-2. Generation：生成带 frontmatter 的 Wiki Markdown 页面。
-
-## 浏览图谱
-
-图谱节点类型包括 `source`、`entity`、`concept`、`synthesis` 和 `query`。系统用直接链接、来源交集、Adamic-Adar 等信号计算边权，再运行 Louvain 社区检测。
-
-## 搜索和定位
-
-使用左侧搜索框过滤 Wiki 页面。点击节点会切换右侧详情，并展示相关链接和 backlinks。
+当前行为与接口以 [Knowledge Engine Spec](/specs/current/knowledge-engine) 为准。

@@ -26,6 +26,7 @@ dist/
 build/
 out/
 .cache/
+app/public/vditor/
 app/test-results/
 app/playwright-report/
 
@@ -55,7 +56,3 @@ agents.md
 claude.md
 
 reference/*
-app/test-results/
-
-
-

@@ -12,21 +12,23 @@ SQLite 保存运行时元数据。路径由 `DEEPMEMO_DB_PATH` 控制，默认�
 
 `message.role` 只能是 `user` 或 `ai`。`file_meta.sync_status` 只能是 `synced`、`dirty`、`draft`、`processing`、`error`。
 
-## Wiki Frontmatter
+## Knowledge Card
 
-Wiki 页面是带 frontmatter 的 Markdown。常见字段：
+Knowledge Cards 是 `data/knowledge/cards/{slug}.yaml` 下的结构化 YAML。核心字段：
 
 | Field | Description |
 |:---|:---|
-| `title` | 页面标题 |
-| `type` | `source`、`entity`、`concept`、`synthesis`、`query` |
-| `status` | `draft`、`active`、`archived` 等 |
+| `id`, `slug`, `title` | 稳定身份和标题 |
+| `type` | `entity`、`concept`、`decision`、`pattern`、`lesson` |
+| `density` | `high`、`medium`、`low` |
+| `definition`, `key_facts` | 定义和关键事实 |
+| `sources` | 来源路径、证据摘要和置信度 |
+| `related_cards` | 关联 Card slug |
 | `tags` | 标签 |
-| `sources` | 来源文件或页面 |
-| `related` | 相关页面 |
 | `aliases` | 别名 |
-| `confidence` | 生成或合并置信度 |
-| `last_updated` | 更新时间 |
+| `created_at`, `updated_at`, `update_count` | 生命周期元数据 |
+| `staleness_score` | 陈旧度评分 |
+| `human_edited`, `human_edited_fields` | 人工编辑及字段保护状态 |
 
 ## AI Pipeline 类型
 

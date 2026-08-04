@@ -5,7 +5,7 @@
 安装 Python 依赖：
 
 ```bash
-uv sync
+uv sync --all-groups
 ```
 
 启动 API：
@@ -26,7 +26,7 @@ http://localhost:8000
 
 ```bash
 cd app
-npm install
+npm ci
 ```
 
 启动开发服务器：
@@ -73,6 +73,7 @@ uv run pytest tests -q --tb=short -m "not e2e"
 
 ```bash
 cd app
+npx playwright install chromium
 npm run test:browser
 ```
 
@@ -82,7 +83,7 @@ npm run test:browser
 
 ```bash
 cd docs/wiki
-npm install
+npm ci
 ```
 
 本地预览：

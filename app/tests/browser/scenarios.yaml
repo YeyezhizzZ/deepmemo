@@ -9,9 +9,9 @@ scenarios:
     steps:
       - click:
           role: button
-          name: Wiki
+          name: Knowledge
       - assert_visible:
-          label: Wiki 页面列表
+          label: Knowledge view
       - click:
           role: button
           name: 编辑器模式
@@ -144,7 +144,7 @@ scenarios:
     steps:
       - click:
           role: button
-          name: Wiki
+          name: Knowledge
       - fill:
           placeholder: 搜索 Wiki 页面
           value: agentic testing
@@ -153,4 +153,4 @@ scenarios:
           name: 重建 Wiki
     asserts:
       - visible:
-          label: Wiki 页面列表
+          label: Knowledge view

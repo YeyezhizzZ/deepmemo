@@ -38,23 +38,32 @@
 | POST | `/api/fs/create-directory` | 创建新目录 |
 | POST | `/api/fs/upload-asset` | 上传图片资源，返回 Vditor 格式 JSON |
 
-## Wiki
+## Knowledge
 
 | Method | Path | Description |
 |:---|:---|:---|
-| GET | `/wiki/tree` | 获取 Wiki 文件树 |
-| GET | `/wiki/graph` | 获取知识图谱 |
-| GET | `/wiki/health` | 获取健康报告 |
-| POST | `/wiki/rebuild` | 重建 Wiki，body 支持 `{ "clean": false }` |
-| POST | `/wiki/ingest` | 对单个源文件执行 ingest |
-| GET | `/wiki/pages` | 列出 Wiki 页面，可用 `page_type` 过滤 |
-| GET | `/wiki/page` | 读取单个 Wiki 页面 |
-| POST | `/wiki/page` | 创建 Wiki 页面 |
-| PUT | `/wiki/page` | 覆盖写入 Wiki 页面 |
-| DELETE | `/wiki/page` | 删除 Wiki 页面 |
-| POST | `/wiki/move` | 移动 Wiki 路径 |
-| POST | `/wiki/directory` | 创建 Wiki 目录 |
-| GET | `/wiki/policy` | 获取策略包 |
+| GET | `/api/knowledge/cards` | 列出 Knowledge Cards，可按类型或标签过滤 |
+| GET | `/api/knowledge/cards/{slug}` | 获取单张 Card |
+| PUT | `/api/knowledge/cards/{slug}` | 更新 Card 并保护人工编辑字段 |
+| DELETE | `/api/knowledge/cards/{slug}` | 删除 Card |
+| POST | `/api/knowledge/compile` | 编译全部支持的 Markdown |
+| POST | `/api/knowledge/compile/file` | 编译指定 Markdown |
+| POST | `/api/knowledge/compile/commit` | 从 Git commit 编译知识 |
+| POST | `/api/knowledge/search` | 检索 Cards |
+| GET | `/api/knowledge/stats` | 获取索引统计 |
+| GET | `/api/knowledge/health` | 获取健康状态 |
+| POST | `/api/knowledge/maintain` | 执行确定性维护 |
+| POST | `/api/knowledge/repowiki/rebuild` | 从 Cards 重建 RepoWiki |
+| GET | `/api/knowledge/repowiki/pages` | 列出 RepoWiki 页面 |
+| GET | `/api/knowledge/repowiki/pages/{slug}` | 获取 RepoWiki 页面 |
+| GET | `/api/knowledge/view` | 获取 Knowledge 前端 ViewModel |
+| GET | `/api/knowledge/view/pages/{slug}` | 获取结构化只读页面 |
+| GET | `/api/knowledge/view/review` | 获取审阅队列 |
+| POST | `/api/knowledge/view/review/{item_id}/confirm` | 确认审阅项 |
+| POST | `/api/knowledge/view/review/{item_id}/hide` | 隐藏审阅项 |
+| POST | `/api/knowledge/view/review/{item_id}/rewrite` | 请求重写审阅项 |
+| POST | `/api/knowledge/view/review/{item_id}/apply` | 应用重写结果 |
+| POST | `/api/knowledge/view/cards/{slug}/pin` | 固定 Card 字段 |
 
 ## Pulse
 
@@ -64,4 +73,4 @@
 
 ## Deprecated
 
-`/api/diary/auto-draft` 仍可在历史代码中看到，但它已在 `docs/specs/deprecated.md` 中被标记为废弃占位接口。不要在新代码或新工作流中依赖它。
+旧 `/wiki/*` 路由未挂载，主应用应返回 404。`/api/diary/auto-draft` 仍可在历史代码中看到，但它已在 `docs/specs/deprecated.md` 中被标记为废弃占位接口。不要在新代码或新工作流中依赖这些接口。

@@ -1,5 +1,7 @@
 # Wiki 知识图谱
 
+> **历史设计**：旧 Wiki graph 已被 Knowledge Engine 取代。`src/wiki/`、`data/wiki/` 和 Wiki graph workspace 当前不存在。
+
 Wiki 图谱把 `data/wiki/` 中的 Markdown 页面看作节点，把内链、来源交集和拓扑关系看作边。它的目标不是替代阅读，而是帮你看见哪些知识正在形成社区。
 
 ```mermaid
@@ -31,13 +33,13 @@ graph LR
 
 ## 边权重
 
-`src/wiki/graph.py` 的 current spec 保留了三类核心信号：
+历史 `src/wiki/graph.py` 设计包含三类核心信号：
 
 - 直接内链：页面之间显式链接。
 - 来源交集：多个页面引用同一批来源。
 - Adamic-Adar：通过共同邻居强化隐藏关系。
 
-图谱构建后会输出 communities。前端 Wiki 模式用社区和 hub 节点帮助用户浏览。
+图谱构建后会输出 communities。旧前端 Wiki 模式曾使用社区和 hub 节点帮助用户浏览。
 
 ## 增量构建
 

@@ -1,0 +1,71 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  quality:
+    name: Tests and builds
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: |
+            app/package-lock.json
+            docs/wiki/package-lock.json
+      - run: uv sync --locked --all-groups
+      - run: npm ci
+        working-directory: app
+      - run: npm ci
+        working-directory: docs/wiki
+      - run: uv run python scripts/verify.py --mode quick
+      - run: uv run pytest tests/e2e -q --tb=short
+      - run: npm run docs:build
+        working-directory: docs/wiki
+      - run: npm audit --audit-level=high
+        working-directory: app
+      - run: npm audit --audit-level=high
+        working-directory: docs/wiki
+
+  browser:
+    name: Browser regression
+    needs: quality
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: app/package-lock.json
+      - run: uv sync --locked --all-groups
+      - run: npm ci
+        working-directory: app
+      - run: npx playwright install --with-deps chromium
+        working-directory: app
+      - run: npm run test:browser
+        working-directory: app

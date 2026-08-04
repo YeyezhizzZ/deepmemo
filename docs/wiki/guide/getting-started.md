@@ -14,19 +14,24 @@
 在仓库根目录安装后端依赖：
 
 ```bash
-uv sync
+uv sync --all-groups
 ```
 
 安装前端依赖：
 
 ```bash
 cd app
-npm install
+npm ci
+cd ..
 ```
 
 ## 配置 LLM
 
-创建或更新 `config/llm_api.yaml`：
+仅编辑和浏览 Knowledge 时可以跳过此步。使用 QA 或 AI 补完前，复制模板并替换 provider 配置：
+
+```bash
+cp config/example.yaml config/llm_api.yaml
+```
 
 ```yaml
 llm:
@@ -68,4 +73,4 @@ npm run dev
 http://localhost:5173
 ```
 
-你会看到 Editor、QA、Wiki 三种模式。`data/mock/` 中的数据用于公开 demo，包含 `deepmemo`、`demo`、`mock` 相关问题时会被 query router 优先路由到这里。
+你会看到 Editor、QA、Knowledge 三种模式。`data/mock/` 中的数据用于公开 demo，包含 `deepmemo`、`demo`、`mock` 相关问题时会被 query router 优先路由到这里。

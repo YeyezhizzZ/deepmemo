@@ -1,5 +1,7 @@
 # DeepMemo x LLM Wiki 架构设计与编译演进规范
 
+> **归档状态**：本文描述的 `src/wiki/`、`data/wiki/` 和 `/wiki/*` 已从当前实现移除。请将其视为历史设计材料；当前契约见 [Knowledge Engine Spec](/specs/current/knowledge-engine)。
+>
 > 最后更新：2026-05-26（含代码审查修正）。基于 `reference/llm_wiki/llm_wiki` 的设计，并结合 DeepMemo 的全量日记编译、全局语义去重重构、Louvain 聚类优化以及未来的自进化 Agent 技能反哺路线，是一份完整的架构规格书。
 > 
 > 详细的思考过程和取舍论证见 [阶段性思考记录](./notes)。
@@ -396,6 +398,8 @@ Procedural Memory (自动编译成 .agents/skills/)
 ---
 
 ## 8. 代码模块拆分
+
+以下为历史设计中的模块拆分，当前仓库不存在 `src/wiki/`：
 
 ```text
 src/wiki/

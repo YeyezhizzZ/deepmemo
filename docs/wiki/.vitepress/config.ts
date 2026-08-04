@@ -29,7 +29,8 @@ export default withMermaid(
       search: { provider: 'local' },
       nav: [
         { text: '教程', link: '/guide/getting-started' },
-        { text: 'Wiki', link: '/wiki/' },
+        { text: 'Knowledge', link: '/specs/current/knowledge-engine' },
+        { text: 'Wiki Archive', link: '/wiki/' },
         { text: 'Design', link: '/design/' },
         { text: 'Specs', link: '/specs/' },
         { text: '操作指南', link: '/how-to/configure-llm' },
@@ -49,12 +50,12 @@ export default withMermaid(
         ],
         '/wiki/': [
           {
-            text: 'Wiki',
+            text: 'Legacy Wiki Archive',
             items: [
-              { text: 'Wiki 导航', link: '/wiki/' },
-              { text: '探索 Wiki 图谱', link: '/wiki/explore' },
-              { text: '重建 Wiki', link: '/wiki/rebuild' },
-              { text: 'Wiki 知识图谱', link: '/wiki/graph' },
+              { text: '归档说明', link: '/wiki/' },
+              { text: '旧版探索流程', link: '/wiki/explore' },
+              { text: '旧版重建流程', link: '/wiki/rebuild' },
+              { text: '旧版知识图谱', link: '/wiki/graph' },
               { text: 'LLM Wiki 架构设计', link: '/wiki/design' },
               { text: '阶段性思考记录', link: '/wiki/notes' }
             ]
@@ -127,6 +128,7 @@ export default withMermaid(
               { text: 'AI Chat RAG', link: '/specs/current/ai-chat-rag' },
               { text: 'Asset Manager', link: '/specs/current/asset-manager' },
               { text: 'File System Watcher', link: '/specs/current/fs-watcher' },
+              { text: 'Knowledge Engine', link: '/specs/current/knowledge-engine' },
               { text: 'Query Routing', link: '/specs/current/query-routing' },
               { text: 'Test Infrastructure', link: '/specs/current/test-infrastructure' },
               { text: 'Wiki Graph', link: '/specs/current/wiki-graph' },
