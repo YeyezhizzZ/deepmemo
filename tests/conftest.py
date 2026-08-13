@@ -13,6 +13,7 @@ from fastapi.testclient import TestClient
 import src.app.core.fs_manager as fs_manager
 import src.app.database as database
 import src.app.main as main_module
+import src.deepme.runtime as deepme_runtime
 import src.routers.knowledge as knowledge_router
 import src.routers.diary as diary_router
 import src.routers.fs as fs_router
@@ -36,6 +37,19 @@ def isolated_app_state(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     data_dir = tmp_path / "data"
     data_dir.mkdir()
     db_path = tmp_path / "data.db"
+    runtime_dir = tmp_path / "runtime"
+    public_source_dir = tmp_path / "public-knowledge"
+    public_source_dir.mkdir()
+    (public_source_dir / "profile.md").write_text(
+        "# Public Profile\n\nDeepMe public fixture knowledge.\n",
+        encoding="utf-8",
+    )
+
+    monkeypatch.setenv("DEEPME_RUNTIME_DIR", str(runtime_dir))
+    monkeypatch.setenv("DEEPME_PUBLIC_SOURCE_DIR", str(public_source_dir))
+    monkeypatch.setenv("DEEPME_COOKIE_SECRET", "test-cookie-secret")
+    monkeypatch.setenv("DEEPME_COOKIE_SECURE", "false")
+    deepme_runtime.reset_runtime()
 
     monkeypatch.setattr(database, "DATABASE_PATH", db_path)
     monkeypatch.setattr(fs_manager, "DATABASE_PATH", db_path)
@@ -65,7 +79,13 @@ def isolated_app_state(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     )
 
     init_db()
-    return SimpleNamespace(data_dir=data_dir, db_path=db_path, provider=provider)
+    return SimpleNamespace(
+        data_dir=data_dir,
+        db_path=db_path,
+        provider=provider,
+        runtime_dir=runtime_dir,
+        public_source_dir=public_source_dir,
+    )
 
 
 @pytest.fixture

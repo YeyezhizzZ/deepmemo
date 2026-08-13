@@ -29,6 +29,7 @@ out/
 app/public/vditor/
 app/test-results/
 app/playwright-report/
+runtime/
 
 # IDE / editor
 .vscode/

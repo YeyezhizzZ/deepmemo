@@ -12,6 +12,7 @@ from pydantic import BaseModel
 from src.ai.service import knowledge_qa_service
 from src.app.database import init_db, get_db_connection
 from src.app.core.watcher import start_watcher, stop_watcher
+from src.deepme.api import router as deepme_router
 from src.knowledge.scheduler import start_knowledge_scheduler, stop_knowledge_scheduler
 from src.routers.fs import router as fs_router
 from src.routers.diary import router as diary_router
@@ -150,6 +151,7 @@ app.include_router(pulse_router)
 app.include_router(citations_router)
 app.include_router(chat_router)
 app.include_router(knowledge_router)
+app.include_router(deepme_router)
 
 
 # --- Session APIs ---

@@ -32,3 +32,8 @@ DeepMemo 的 spec 体系给 AI coding agent 和人类协作者提供共同的行
 ## Proposed Roadmaps
 
 - [Knowledge Engine v2 Roadmap](/specs/proposed/knowledge-engine-v2-roadmap)
+- [DeepMe Scope Isolation](/specs/proposed/deepme-scope-isolation)
+
+## Active Goals
+
+- [DeepMe Scope Foundation](/specs/goals/deepme-scope-foundation.goal)
