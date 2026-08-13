@@ -1,5 +1,6 @@
 # Browser Fixtures
 
-`smoke_basic` is the active mock workspace used by Playwright browser tests.
+`smoke_basic` is the active mock knowledge source used by DeepMe Playwright tests.
 
-Other dataset names in `scenarios.yaml` are planned browser workflows and are not enabled yet.
+The active scenarios cover the public home page, public knowledge chat, and temporary
+Markdown upload through the API and Worker.

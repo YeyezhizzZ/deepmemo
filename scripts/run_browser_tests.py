@@ -110,6 +110,12 @@ def main() -> int:
         {
             "DEEPMEMO_DATA_DIR": str(data_dir),
             "DEEPMEMO_DB_PATH": str(db_path),
+            "DEEPME_RUNTIME_DIR": str(data_dir.parent / "runtime"),
+            "DEEPME_PUBLIC_SOURCE_DIR": str(data_dir),
+            "DEEPME_COOKIE_SECRET": "browser-test-cookie-secret",
+            "DEEPME_RETRIEVAL_MODE": "ngram",
+            "DEEPME_RERANK_ENABLED": "false",
+            "DEEPME_PUBLIC_SYNC_SECONDS": "3600",
             "DEEPMEMO_WATCHER_MODE": "polling",
             "DEEPMEMO_BASE_URL": frontend_url,
             "PYTHONPATH": str(REPO_ROOT),
@@ -141,6 +147,11 @@ def main() -> int:
         cwd=REPO_ROOT,
         env=backend_env,
     )
+    worker = spawn(
+        [str(python_bin), "-m", "src.deepme.worker"],
+        cwd=REPO_ROOT,
+        env=backend_env,
+    )
     frontend = spawn(
         ["npm", "run", "dev", "--", "--host", "127.0.0.1", "--port", str(frontend_port)],
         cwd=APP_ROOT,
@@ -154,6 +165,7 @@ def main() -> int:
         return completed.returncode
     finally:
         terminate(frontend)
+        terminate(worker)
         terminate(backend)
 
 

@@ -37,6 +37,20 @@ class DeepMeSettings:
     cookie_secure: bool
     visitor_ttl_hours: int
     session_ttl_hours: int
+    upload_enabled: bool
+    upload_ttl_hours: int
+    upload_max_files: int
+    upload_max_bytes: int
+    upload_max_file_bytes: int
+    pdf_max_pages: int
+    parse_timeout_seconds: int
+    normalized_max_chars: int
+    worker_poll_seconds: int
+    public_sync_seconds: int
+    retrieval_mode: str
+    rerank_enabled: bool
+    chat_rate_limit_per_minute: int
+    upload_rate_limit_per_hour: int
 
     @classmethod
     def from_env(cls) -> "DeepMeSettings":
@@ -51,6 +65,9 @@ class DeepMeSettings:
             if environment == "production":
                 raise ValueError("DEEPME_COOKIE_SECRET is required in production")
             cookie_secret = "deepme-development-cookie-secret"
+        retrieval_mode = os.getenv("DEEPME_RETRIEVAL_MODE", "hybrid").strip().lower()
+        if retrieval_mode not in {"ngram", "hybrid"}:
+            raise ValueError("DEEPME_RETRIEVAL_MODE must be ngram or hybrid")
 
         return cls(
             repo_root=repo_root,
@@ -66,6 +83,32 @@ class DeepMeSettings:
             cookie_secure=_env_bool("DEEPME_COOKIE_SECURE", environment == "production"),
             visitor_ttl_hours=_env_int("DEEPME_VISITOR_TTL_HOURS", 24),
             session_ttl_hours=_env_int("DEEPME_SESSION_TTL_HOURS", 24),
+            upload_enabled=_env_bool("DEEPME_UPLOAD_ENABLED", True),
+            upload_ttl_hours=_env_int("DEEPME_UPLOAD_TTL_HOURS", 24),
+            upload_max_files=_env_int("DEEPME_UPLOAD_MAX_FILES", 20),
+            upload_max_bytes=_env_int("DEEPME_UPLOAD_MAX_BYTES", 50 * 1024 * 1024),
+            upload_max_file_bytes=_env_int(
+                "DEEPME_UPLOAD_MAX_FILE_BYTES",
+                20 * 1024 * 1024,
+            ),
+            pdf_max_pages=_env_int("DEEPME_PDF_MAX_PAGES", 200),
+            parse_timeout_seconds=_env_int("DEEPME_PARSE_TIMEOUT_SECONDS", 60),
+            normalized_max_chars=_env_int(
+                "DEEPME_NORMALIZED_MAX_CHARS",
+                2_000_000,
+            ),
+            worker_poll_seconds=_env_int("DEEPME_WORKER_POLL_SECONDS", 2),
+            public_sync_seconds=_env_int("DEEPME_PUBLIC_SYNC_SECONDS", 24 * 3600),
+            retrieval_mode=retrieval_mode,
+            rerank_enabled=_env_bool("DEEPME_RERANK_ENABLED", True),
+            chat_rate_limit_per_minute=_env_int(
+                "DEEPME_CHAT_RATE_LIMIT_PER_MINUTE",
+                30,
+            ),
+            upload_rate_limit_per_hour=_env_int(
+                "DEEPME_UPLOAD_RATE_LIMIT_PER_HOUR",
+                20,
+            ),
         )
 
     @property
@@ -75,3 +118,7 @@ class DeepMeSettings:
     @property
     def public_staging_dir(self) -> Path:
         return self.runtime_dir / "public" / "staging"
+
+    @property
+    def temporary_dir(self) -> Path:
+        return self.runtime_dir / "temporary"

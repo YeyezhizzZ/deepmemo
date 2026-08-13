@@ -9,7 +9,9 @@ from src.ai.query_router import QueryRouter
 from src.ai.service import KnowledgeQAService
 from src.ai.types import RouteDecision
 from src.ai.web_search_agent import WebSearchAgent
+from src.deepme.retrieval import VersionedChunkSearchAgent
 from src.deepme.scopes import ResolvedScope
+from src.deepme.settings import DeepMeSettings
 from src.services.llm_service import llm_service
 
 
@@ -79,9 +81,29 @@ class DeepMeAnswerComposer(AnswerComposer):
         del history, retrieval_query
         yield self._compose_no_evidence(question, route, web_result)
 
+    def _format_evidence(self, local_result) -> str:
+        blocks = []
+        for index, item in enumerate(local_result.evidence, start=1):
+            location = f"{item.path}:{item.start_line}-{item.end_line}"
+            if item.page_start is not None:
+                location += f" page {item.page_start}"
+                if item.page_end and item.page_end != item.page_start:
+                    location += f"-{item.page_end}"
+            blocks.append(
+                "\n".join(
+                    [
+                        f"[证据 {index}] {location}",
+                        f"引用编号：[{index}]",
+                        item.excerpt,
+                    ]
+                )
+            )
+        return "\n\n".join(blocks)
+
 
 class ScopedQAServiceFactory:
-    def __init__(self):
+    def __init__(self, settings: DeepMeSettings):
+        self.settings = settings
         self._cache: dict[tuple[str, str], KnowledgeQAService] = {}
         self._lock = threading.Lock()
 
@@ -91,11 +113,17 @@ class ScopedQAServiceFactory:
             service = self._cache.get(key)
             if service is None:
                 router = DeepMeQueryRouter()
-                tools = KnowledgeBaseTools(root_path=scope.documents_root)
-                local_search = LocalSearchAgent(
-                    tools=tools,
-                    knowledge_retriever=SourceOnlyKnowledgeRetriever(),
-                )
+                if scope.index_path and scope.index_path.is_file():
+                    local_search = VersionedChunkSearchAgent(
+                        scope.index_path,
+                        self.settings,
+                    )
+                else:
+                    tools = KnowledgeBaseTools(root_path=scope.documents_root)
+                    local_search = LocalSearchAgent(
+                        tools=tools,
+                        knowledge_retriever=SourceOnlyKnowledgeRetriever(),
+                    )
                 service = KnowledgeQAService(
                     router=router,
                     local_search_agent=local_search,

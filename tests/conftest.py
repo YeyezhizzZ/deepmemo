@@ -49,6 +49,8 @@ def isolated_app_state(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setenv("DEEPME_PUBLIC_SOURCE_DIR", str(public_source_dir))
     monkeypatch.setenv("DEEPME_COOKIE_SECRET", "test-cookie-secret")
     monkeypatch.setenv("DEEPME_COOKIE_SECURE", "false")
+    monkeypatch.setenv("DEEPME_RETRIEVAL_MODE", "ngram")
+    monkeypatch.setenv("DEEPME_RERANK_ENABLED", "false")
     deepme_runtime.reset_runtime()
 
     monkeypatch.setattr(database, "DATABASE_PATH", db_path)

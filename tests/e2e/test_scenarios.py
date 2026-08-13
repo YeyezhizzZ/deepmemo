@@ -3,13 +3,20 @@ import sqlite3
 import pytest
 import yaml
 
+from src.deepme.runtime import get_runtime
+from src.deepme.worker import DeepMeWorker
+
 
 def test_scenario_registry_contains_executable_critical_scenarios():
     with open("tests/e2e/scenarios.yaml", "r", encoding="utf-8") as handle:
         data = yaml.safe_load(handle)
 
     scenario_ids = {item["id"] for item in data["scenarios"]}
-    assert {"fs_create_write_read_move", "chat_citation_traceability"} <= scenario_ids
+    assert {
+        "fs_create_write_read_move",
+        "chat_citation_traceability",
+        "deepme_temporary_workspace_lifecycle",
+    } <= scenario_ids
 
 
 @pytest.mark.e2e
@@ -77,3 +84,41 @@ def test_chat_citation_traceability_scenario(client, db_path, test_data_dir):
     assert len(references) == 1
     assert references[0]["session_id"] == session_id
     assert references[0]["message_id"] == "ai-e2e"
+
+
+@pytest.mark.e2e
+def test_deepme_temporary_workspace_lifecycle_scenario(client):
+    client.get("/api/v1/site")
+    workspace = client.post("/api/v1/workspaces").json()
+    upload = client.post(
+        f"/api/v1/workspaces/{workspace['workspace_id']}/files",
+        files={
+            "files": (
+                "e2e.md",
+                b"# E2E\n\ndeepme-workspace-evidence\n",
+                "text/markdown",
+            )
+        },
+    )
+    assert upload.status_code == 202
+
+    worker = DeepMeWorker(get_runtime())
+    while worker.run_once():
+        pass
+    ready = client.get(
+        f"/api/v1/workspaces/{workspace['workspace_id']}"
+    ).json()
+    assert ready["status"] == "ready"
+
+    session = client.post(
+        "/api/v1/sessions",
+        json={"mode": "temporary", "workspace_id": workspace["workspace_id"]},
+    ).json()
+    delete = client.delete(
+        f"/api/v1/workspaces/{workspace['workspace_id']}"
+    )
+    assert delete.status_code == 202
+    assert (
+        client.get(f"/api/v1/sessions/{session['session_id']}/messages").status_code
+        == 404
+    )

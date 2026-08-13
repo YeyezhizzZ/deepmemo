@@ -11,6 +11,7 @@ type ScenarioStep =
   | { fill: { placeholder: string; value: string } }
   | { rename_file: { old_path: string; new_path: string } }
   | { upload_asset: { path: string } }
+  | { upload_knowledge: { path: string } }
   | { open_file_references: { path: string } }
   | { assert_visible: { label?: string; title?: string; testId?: string } }
   | { assert_file_contains: { path: string; text: string } };
@@ -103,7 +104,7 @@ async function revealFilePath(page: Page, filePath: string) {
 
 async function runScenario(page: Page, scenario: Scenario) {
   await page.goto('/');
-  await expect(page.getByLabel('data 文件树')).toBeVisible();
+  await expect(page.getByLabel('DeepMe 首页')).toBeVisible();
 
   for (const step of scenario.steps ?? []) {
     if ('click' in step) {
@@ -159,6 +160,14 @@ async function runScenario(page: Page, scenario: Scenario) {
 
     if ('upload_asset' in step) {
       await page.setInputFiles('input[type="file"]', path.resolve(path.dirname(new URL(import.meta.url).pathname), step.upload_asset.path));
+      continue;
+    }
+
+    if ('upload_knowledge' in step) {
+      await page.setInputFiles(
+        'input[aria-label="上传知识文件"]',
+        path.resolve(path.dirname(new URL(import.meta.url).pathname), step.upload_knowledge.path),
+      );
       continue;
     }
 

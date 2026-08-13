@@ -4,7 +4,7 @@
 
 | 项目 | 内容 |
 | --- | --- |
-| 文档状态 | Draft |
+| 文档状态 | Implemented for MVP |
 | 对应 PRD | `docs/product/deepme-prd.md` |
 | 目标版本 | DeepMe MVP |
 | 创建日期 | 2026-08-12 |

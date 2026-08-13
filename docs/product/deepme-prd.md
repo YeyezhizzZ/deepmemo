@@ -6,7 +6,7 @@
 | --- | --- |
 | 产品名称 | DeepMe |
 | 项目基础 | DeepMemo |
-| 文档状态 | Draft |
+| 文档状态 | MVP Implemented |
 | 目标版本 | MVP |
 | 创建日期 | 2026-08-12 |
 | 当前分支 | `deepme` |

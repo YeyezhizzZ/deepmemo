@@ -1,12 +1,43 @@
 from __future__ import annotations
 
+import io
 from types import SimpleNamespace
 
 from fastapi.testclient import TestClient
+from pypdf import PdfWriter
+from pypdf.generic import DictionaryObject, NameObject, StreamObject
 
 from src.ai.types import Evidence
 from src.app.main import app
 from src.deepme.runtime import get_runtime
+from src.deepme.worker import DeepMeWorker
+
+
+def pdf_with_text(text: str) -> bytes:
+    writer = PdfWriter()
+    page = writer.add_blank_page(width=612, height=792)
+    font = DictionaryObject(
+        {
+            NameObject("/Type"): NameObject("/Font"),
+            NameObject("/Subtype"): NameObject("/Type1"),
+            NameObject("/BaseFont"): NameObject("/Helvetica"),
+        }
+    )
+    page[NameObject("/Resources")] = DictionaryObject(
+        {
+            NameObject("/Font"): DictionaryObject(
+                {NameObject("/F1"): writer._add_object(font)}
+            )
+        }
+    )
+    stream = StreamObject()
+    stream.set_data(
+        f"BT /F1 12 Tf 72 720 Td ({text}) Tj ET".encode("ascii")
+    )
+    page[NameObject("/Contents")] = writer._add_object(stream)
+    output = io.BytesIO()
+    writer.write(output)
+    return output.getvalue()
 
 
 class FakeScopedQAService:
@@ -37,6 +68,24 @@ class FakeScopedQAFactory:
         return None
 
 
+class FakeNoEvidenceQAFactory:
+    def create(self, scope):
+        del scope
+
+        class Service:
+            def answer_stream(self, question, history=None):
+                del question, history
+                return SimpleNamespace(
+                    chunks=iter(["当前公开知识库没有找到足够证据回答这个问题。"]),
+                    local_result=SimpleNamespace(evidence=[]),
+                )
+
+        return Service()
+
+    def clear(self):
+        return None
+
+
 def test_site_creates_visitor_and_exposes_public_version(client):
     response = client.get("/api/v1/site")
 
@@ -44,7 +93,7 @@ def test_site_creates_visitor_and_exposes_public_version(client):
     body = response.json()
     assert body["name"] == "DeepMe"
     assert body["public_scope_id"] == "public"
-    assert body["knowledge_version"].startswith("v1_")
+    assert body["knowledge_version"].startswith("v2_")
     assert response.cookies.get("deepme_visitor")
 
 
@@ -131,16 +180,147 @@ def test_chat_rejects_client_supplied_scope_id(client):
     assert response.status_code == 422
 
 
-def test_temporary_mode_is_not_enabled_before_workspace_phase(client):
+def test_no_evidence_question_returns_explicit_status(client):
     client.get("/api/v1/site")
+    session = client.post(
+        "/api/v1/sessions",
+        json={"mode": "system"},
+    ).json()
+    get_runtime().qa_factory = FakeNoEvidenceQAFactory()
 
     response = client.post(
-        "/api/v1/sessions",
-        json={"mode": "temporary", "workspace_id": "ws_missing"},
+        "/api/v1/chat/stream",
+        json={
+            "session_id": session["session_id"],
+            "user_message": "知识库没有记录的问题",
+        },
     )
 
-    assert response.status_code == 400
-    assert response.json()["detail"]["code"] == "temporary_workspace_not_implemented"
+    assert response.status_code == 200
+    assert '"answer_status": "insufficient_evidence"' in response.text
+    messages = client.get(
+        f"/api/v1/sessions/{session['session_id']}/messages"
+    ).json()
+    assert messages[-1]["answer_status"] == "insufficient_evidence"
+    citations = client.get(
+        f"/api/v1/messages/{messages[-1]['message_id']}/citations"
+    ).json()["citations"]
+    assert citations == []
+
+
+def test_workspace_rejects_unsupported_file_and_other_owner(client):
+    client.get("/api/v1/site")
+    workspace = client.post("/api/v1/workspaces").json()
+
+    unsupported = client.post(
+        f"/api/v1/workspaces/{workspace['workspace_id']}/files",
+        files={"files": ("archive.zip", b"not-a-zip", "application/zip")},
+    )
+    assert unsupported.status_code == 415
+
+    other_client = TestClient(app)
+    other_client.get("/api/v1/site")
+    forbidden = other_client.get(
+        f"/api/v1/workspaces/{workspace['workspace_id']}"
+    )
+    assert forbidden.status_code == 404
+
+
+def test_temporary_workspace_upload_build_session_and_delete(client):
+    client.get("/api/v1/site")
+    workspace_response = client.post("/api/v1/workspaces")
+    assert workspace_response.status_code == 200
+    workspace = workspace_response.json()
+    assert workspace["status"] == "empty"
+
+    early_session = client.post(
+        "/api/v1/sessions",
+        json={"mode": "temporary", "workspace_id": workspace["workspace_id"]},
+    )
+    assert early_session.status_code == 409
+
+    upload_response = client.post(
+        f"/api/v1/workspaces/{workspace['workspace_id']}/files",
+        files={
+            "files": (
+                "notes.md",
+                b"# Notes\n\nworkspace-needle belongs to this upload.\n",
+                "text/markdown",
+            )
+        },
+    )
+    assert upload_response.status_code == 202
+    assert upload_response.json()["status"] == "processing"
+
+    worker = DeepMeWorker(get_runtime())
+    while worker.run_once():
+        pass
+
+    ready_response = client.get(
+        f"/api/v1/workspaces/{workspace['workspace_id']}"
+    )
+    assert ready_response.status_code == 200
+    ready = ready_response.json()
+    assert ready["status"] == "ready"
+    assert ready["knowledge_version"].startswith("v1_")
+    assert ready["files"][0]["status"] == "ready"
+
+    session_response = client.post(
+        "/api/v1/sessions",
+        json={"mode": "temporary", "workspace_id": workspace["workspace_id"]},
+    )
+    assert session_response.status_code == 200
+    session = session_response.json()
+    assert session["scope_id"] == workspace["workspace_id"]
+
+    runtime = get_runtime()
+    scope_record = runtime.registry.get_scope(workspace["workspace_id"])
+    service = runtime.qa_factory.create(
+        runtime.registry.resolve(workspace["workspace_id"], scope_record.owner_key)
+    )
+    result = service.local_search_agent.search("workspace-needle")
+    assert result.evidence
+
+    stream_response = client.post(
+        "/api/v1/chat/stream",
+        json={
+            "session_id": session["session_id"],
+            "user_message": "workspace-needle",
+        },
+    )
+    assert stream_response.status_code == 200
+    assert '"answer_status": "grounded"' in stream_response.text
+    messages = client.get(
+        f"/api/v1/sessions/{session['session_id']}/messages"
+    ).json()
+    assert "[1]" in messages[-1]["content"]
+    citations = client.get(
+        f"/api/v1/messages/{messages[-1]['message_id']}/citations"
+    ).json()["citations"]
+    assert citations
+    assert citations[0]["scope_id"] == workspace["workspace_id"]
+    assert citations[0]["display_name"] == "notes.md"
+
+    delete_response = client.delete(
+        f"/api/v1/workspaces/{workspace['workspace_id']}"
+    )
+    assert delete_response.status_code == 202
+    inaccessible = client.get(
+        f"/api/v1/sessions/{session['session_id']}/messages"
+    )
+    assert inaccessible.status_code == 404
+    inaccessible_citations = client.get(
+        f"/api/v1/messages/{messages[-1]['message_id']}/citations"
+    )
+    assert inaccessible_citations.status_code == 404
+
+    while worker.run_once():
+        pass
+    deletion = client.get(
+        f"/api/v1/workspaces/{workspace['workspace_id']}/deletion"
+    )
+    assert deletion.status_code == 200
+    assert deletion.json()["status"] == "deleted"
 
 
 def test_scoped_qa_searches_public_snapshot_only(isolated_app_state):
@@ -158,4 +338,72 @@ def test_scoped_qa_searches_public_snapshot_only(isolated_app_state):
 
     assert public_result.evidence
     assert all(item.path != "private.md" for item in public_result.evidence)
-    assert private_result.evidence == []
+    assert all(item.path != "private.md" for item in private_result.evidence)
+    assert all("private-needle" not in item.excerpt for item in private_result.evidence)
+
+
+def test_two_temporary_workspaces_use_separate_indexes(client):
+    client.get("/api/v1/site")
+    first = client.post("/api/v1/workspaces").json()
+    second = client.post("/api/v1/workspaces").json()
+    client.post(
+        f"/api/v1/workspaces/{first['workspace_id']}/files",
+        files={"files": ("first.md", "苹果火箭甲".encode(), "text/markdown")},
+    )
+    client.post(
+        f"/api/v1/workspaces/{second['workspace_id']}/files",
+        files={"files": ("second.md", "海盐星球乙".encode(), "text/markdown")},
+    )
+    worker = DeepMeWorker(get_runtime())
+    while worker.run_once():
+        pass
+
+    runtime = get_runtime()
+    first_scope = runtime.registry.get_scope(first["workspace_id"])
+    second_scope = runtime.registry.get_scope(second["workspace_id"])
+    first_service = runtime.qa_factory.create(
+        runtime.registry.resolve(first["workspace_id"], first_scope.owner_key)
+    )
+    second_service = runtime.qa_factory.create(
+        runtime.registry.resolve(second["workspace_id"], second_scope.owner_key)
+    )
+
+    first_result = first_service.local_search_agent.search("苹果火箭甲")
+    second_result = second_service.local_search_agent.search("海盐星球乙")
+
+    assert first_result.evidence
+    assert second_result.evidence
+    assert all("海盐星球乙" not in item.excerpt for item in first_result.evidence)
+    assert all("苹果火箭甲" not in item.excerpt for item in second_result.evidence)
+
+
+def test_pdf_upload_preserves_page_citation(client):
+    client.get("/api/v1/site")
+    workspace = client.post("/api/v1/workspaces").json()
+    response = client.post(
+        f"/api/v1/workspaces/{workspace['workspace_id']}/files",
+        files={
+            "files": (
+                "evidence.pdf",
+                pdf_with_text("pdf-needle evidence"),
+                "application/pdf",
+            )
+        },
+    )
+    assert response.status_code == 202
+    worker = DeepMeWorker(get_runtime())
+    while worker.run_once():
+        pass
+
+    runtime = get_runtime()
+    scope = runtime.registry.get_scope(workspace["workspace_id"])
+    service = runtime.qa_factory.create(
+        runtime.registry.resolve(workspace["workspace_id"], scope.owner_key)
+    )
+    result = service.local_search_agent.search("pdf-needle")
+
+    assert result.evidence
+    assert result.evidence[0].display_name == "evidence.pdf"
+    assert result.evidence[0].source_type == "pdf"
+    assert result.evidence[0].page_start == 1
+    assert result.evidence[0].page_end == 1

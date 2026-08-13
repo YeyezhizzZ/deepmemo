@@ -64,6 +64,11 @@ class Evidence:
     excerpt: str
     score: float
     query: str
+    display_name: str | None = None
+    source_type: str = "markdown"
+    page_start: int | None = None
+    page_end: int | None = None
+    content_hash: str | None = None
 
     @property
     def source_id(self) -> str:

@@ -6,6 +6,7 @@ from datetime import datetime
 from pathlib import Path
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
@@ -23,22 +24,51 @@ from src.routers.knowledge import router as knowledge_router
 
 
 DATA_DIR = Path(os.getenv("DEEPMEMO_DATA_DIR", Path(__file__).resolve().parents[2] / "data"))
+FRONTEND_DIST = Path(__file__).resolve().parents[2] / "app" / "dist"
+SERVE_FRONTEND = os.getenv("DEEPME_SERVE_FRONTEND", "").lower() in {
+    "1",
+    "true",
+    "yes",
+}
+PUBLIC_MODE = os.getenv("DEEPME_PUBLIC_MODE", "").lower() in {
+    "1",
+    "true",
+    "yes",
+}
+DISABLE_WATCHER = os.getenv("DEEPMEMO_DISABLE_WATCHER", "").lower() in {
+    "1",
+    "true",
+    "yes",
+}
 
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
     init_db()
-    start_watcher()
+    if not DISABLE_WATCHER:
+        start_watcher()
     start_knowledge_scheduler(DATA_DIR)
     try:
         yield
     finally:
-        stop_watcher()
+        if not DISABLE_WATCHER:
+            stop_watcher()
         stop_knowledge_scheduler()
 
 
-app = FastAPI(title="DeepMemo API", version="0.6.0", lifespan=lifespan)
-app.mount("/assets", StaticFiles(directory=DATA_DIR / "assets", check_dir=False), name="assets")
+app = FastAPI(
+    title="DeepMe API" if PUBLIC_MODE else "DeepMemo API",
+    version="0.7.0" if PUBLIC_MODE else "0.6.0",
+    lifespan=lifespan,
+)
+app.mount(
+    "/assets",
+    StaticFiles(
+        directory=(FRONTEND_DIST / "assets") if SERVE_FRONTEND else (DATA_DIR / "assets"),
+        check_dir=False,
+    ),
+    name="frontend-assets" if SERVE_FRONTEND else "assets",
+)
 
 app.add_middleware(
     CORSMiddleware,
@@ -50,6 +80,23 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+@app.middleware("http")
+async def block_legacy_public_routes(request, call_next):
+    if PUBLIC_MODE:
+        blocked_prefixes = (
+            "/sessions",
+            "/chat",
+            "/api/fs",
+            "/api/diary",
+            "/api/pulse",
+            "/api/chat",
+            "/api/knowledge",
+        )
+        if request.url.path.startswith(blocked_prefixes):
+            return JSONResponse(status_code=404, content={"detail": "Not found"})
+    return await call_next(request)
 
 
 # --- Pydantic Models ---
@@ -293,4 +340,23 @@ def get_file_references(path: str):
 # --- Root ---
 @app.get("/")
 def root():
+    if SERVE_FRONTEND and (FRONTEND_DIST / "index.html").is_file():
+        return FileResponse(FRONTEND_DIST / "index.html")
     return {"message": "DeepMemo API is running"}
+
+
+if SERVE_FRONTEND:
+
+    @app.get("/{frontend_path:path}", include_in_schema=False)
+    def frontend_fallback(frontend_path: str):
+        candidate = (FRONTEND_DIST / frontend_path).resolve()
+        try:
+            candidate.relative_to(FRONTEND_DIST.resolve())
+        except ValueError:
+            raise HTTPException(status_code=404, detail="Not found")
+        if candidate.is_file():
+            return FileResponse(candidate)
+        index_path = FRONTEND_DIST / "index.html"
+        if index_path.is_file():
+            return FileResponse(index_path)
+        raise HTTPException(status_code=404, detail="Frontend build not found")

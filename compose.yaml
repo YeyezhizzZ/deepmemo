@@ -1,0 +1,55 @@
+services:
+  api:
+    build: .
+    restart: unless-stopped
+    env_file:
+      - path: .env
+        required: false
+    environment: &deepme-environment
+      DEEPMEMO_DB_PATH: /runtime/state/deepme.db
+      DEEPMEMO_DATA_DIR: /app/data
+      DEEPMEMO_DISABLE_WATCHER: "true"
+      DEEPMEMO_DISABLE_KNOWLEDGE_SCHEDULER: "true"
+      DEEPME_ENV: production
+      DEEPME_RUNTIME_DIR: /runtime
+      DEEPME_PUBLIC_SOURCE_DIR: /knowledge
+      DEEPME_PUBLIC_MODE: "true"
+      DEEPME_SERVE_FRONTEND: "true"
+    volumes:
+      - deepme-runtime:/runtime
+      - ./public-knowledge:/knowledge:ro
+      - ./config:/app/config:ro
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:8000/api/v1/health/ready"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+
+  worker:
+    build: .
+    restart: unless-stopped
+    command: ["python", "-m", "src.deepme.worker"]
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      <<: *deepme-environment
+      DEEPME_SERVE_FRONTEND: "false"
+    volumes:
+      - deepme-runtime:/runtime
+      - ./public-knowledge:/knowledge:ro
+      - ./config:/app/config:ro
+
+  caddy:
+    image: caddy:2.10-alpine
+    restart: unless-stopped
+    depends_on:
+      api:
+        condition: service_healthy
+    ports:
+      - "${DEEPME_HTTP_PORT:-8080}:80"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+
+volumes:
+  deepme-runtime:

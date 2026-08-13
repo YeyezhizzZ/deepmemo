@@ -3,15 +3,29 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import re
 import shutil
 import threading
 import uuid
+from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 
+from src.deepme.retrieval import VersionIndexBuilder
 from src.deepme.scopes import ResolvedScope, ScopeRegistry
 from src.deepme.settings import DeepMeSettings
+
+
+_SENSITIVE_PATTERNS = (
+    re.compile(r"-----BEGIN [A-Z ]*PRIVATE KEY-----"),
+    re.compile(r"\b(?:ghp|gho|github_pat|sk|AKIA)[_-]?[A-Za-z0-9_-]{16,}\b"),
+    re.compile(
+        r"(?i)\b(?:api[_-]?key|access[_-]?token|client[_-]?secret)\b"
+        r"\s*[:=]\s*['\"]?[A-Za-z0-9_./+=-]{16,}"
+    ),
+    re.compile(r"(?:^|[\s(`'\"])/(?:Users|home)/[^\s)`'\"]+"),
+)
 
 
 class PublicKnowledgeBuildError(RuntimeError):
@@ -31,15 +45,33 @@ class PublicKnowledgePublisher:
         self.settings = settings
         self.registry = registry
         self._publish_lock = threading.Lock()
+        self.index_builder = VersionIndexBuilder(settings)
 
     def publish(self) -> ResolvedScope:
         with self._publish_lock:
-            return self._publish_locked()
+            with self._process_lock():
+                return self._publish_locked()
+
+    @contextmanager
+    def _process_lock(self):
+        lock_path = self.settings.runtime_dir / "public" / ".publish.lock"
+        lock_path.parent.mkdir(parents=True, exist_ok=True)
+        with lock_path.open("a+", encoding="utf-8") as handle:
+            try:
+                import fcntl
+            except ImportError:
+                yield
+                return
+            fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
+            try:
+                yield
+            finally:
+                fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
 
     def _publish_locked(self) -> ResolvedScope:
         source_files = self._discover_source_files()
         content_hash = self._content_hash(source_files)
-        version = f"v1_{content_hash[:16]}"
+        version = f"v2_{content_hash[:16]}"
         release_dir = self.settings.public_releases_dir / version
 
         if not release_dir.exists():
@@ -48,11 +80,15 @@ class PublicKnowledgePublisher:
         runtime_root = self.settings.runtime_dir.resolve()
         documents_path = (release_dir / "documents").relative_to(runtime_root).as_posix()
         manifest_path = (release_dir / "manifest.json").relative_to(runtime_root).as_posix()
+        index_path = (release_dir / "index" / "search.sqlite3").relative_to(
+            runtime_root
+        ).as_posix()
         return self.registry.register_public_version(
             version=version,
             content_hash=content_hash,
             documents_path=documents_path,
             manifest_path=manifest_path,
+            index_path=index_path,
             source_revision=os.getenv("DEEPME_PUBLIC_SOURCE_REVISION") or None,
         )
 
@@ -80,11 +116,12 @@ class PublicKnowledgePublisher:
                 )
             content = path.read_bytes()
             try:
-                content.decode("utf-8")
+                decoded = content.decode("utf-8")
             except UnicodeDecodeError as exc:
                 raise PublicKnowledgeBuildError(
                     f"public knowledge must be UTF-8: {relative.as_posix()}"
                 ) from exc
+            self._scan_sensitive_content(decoded, relative.as_posix())
             files.append(
                 SourceFile(
                     path=path,
@@ -97,6 +134,13 @@ class PublicKnowledgePublisher:
         if not files:
             raise PublicKnowledgeBuildError("public knowledge directory has no Markdown files")
         return files
+
+    def _scan_sensitive_content(self, content: str, relative_path: str) -> None:
+        for line_number, line in enumerate(content.splitlines(), start=1):
+            if any(pattern.search(line) for pattern in _SENSITIVE_PATTERNS):
+                raise PublicKnowledgeBuildError(
+                    f"sensitive content detected at {relative_path}:{line_number}"
+                )
 
     def _contains_symlink(self, source_root: Path, path: Path) -> bool:
         current = path
@@ -144,12 +188,20 @@ class PublicKnowledgePublisher:
                 "files": [
                     {
                         "path": item.relative_path,
+                        "display_name": item.relative_path,
+                        "source_type": "markdown",
                         "sha256": item.sha256,
                         "byte_size": item.byte_size,
                     }
                     for item in files
                 ],
             }
+            index_stats = self.index_builder.build(
+                documents_root=documents_dir,
+                manifest=manifest,
+                index_path=staging_dir / "index" / "search.sqlite3",
+            )
+            manifest["index"] = index_stats
             (staging_dir / "manifest.json").write_text(
                 json.dumps(manifest, ensure_ascii=False, indent=2) + "\n",
                 encoding="utf-8",

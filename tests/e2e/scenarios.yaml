@@ -14,3 +14,11 @@ scenarios:
       创建会话和一条带 citation 的 AI 消息，随后通过 citations API
       获取证据链，并通过 file-references API 从文件路径反查对应会话。
     tags: [chat, citations, critical]
+
+  - id: deepme_temporary_workspace_lifecycle
+    spec: docs/specs/proposed/deepme-temporary-workspace.md
+    name: "DeepMe 临时知识空间完整生命周期"
+    description: |
+      匿名访客创建 workspace，上传 Markdown，Worker 构建可查询版本。
+      创建 temporary session 后主动删除，旧会话立即不可访问。
+    tags: [deepme, workspace, isolation, critical]

@@ -31,6 +31,7 @@ def test_public_snapshot_is_immutable_and_uses_only_public_source(
 
 
 def test_public_snapshot_rejects_symlink(isolated_app_state):
+    first = get_runtime().ensure_public_ready()
     outside = isolated_app_state.runtime_dir / "outside.md"
     outside.parent.mkdir(parents=True, exist_ok=True)
     outside.write_text("outside", encoding="utf-8")
@@ -38,12 +39,23 @@ def test_public_snapshot_rejects_symlink(isolated_app_state):
 
     with pytest.raises(PublicKnowledgeBuildError, match="symlink"):
         get_runtime().publisher.publish()
+    assert get_runtime().registry.resolve("public").knowledge_version == first.knowledge_version
 
 
 def test_public_snapshot_rejects_non_utf8_markdown(isolated_app_state):
     (isolated_app_state.public_source_dir / "invalid.md").write_bytes(b"\xff\xfe")
 
     with pytest.raises(PublicKnowledgeBuildError, match="UTF-8"):
+        get_runtime().publisher.publish()
+
+
+def test_public_snapshot_rejects_sensitive_content(isolated_app_state):
+    (isolated_app_state.public_source_dir / "secret.md").write_text(
+        "api_key = 'sk-abcdefghijklmnopqrstuvwxyz'\n",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(PublicKnowledgeBuildError, match=r"secret\.md:1"):
         get_runtime().publisher.publish()
 
 

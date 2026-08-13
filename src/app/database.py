@@ -77,6 +77,7 @@ def run_migrations(conn: sqlite3.Connection) -> None:
 
 
 def init_db():
+    DATABASE_PATH.parent.mkdir(parents=True, exist_ok=True)
     conn = get_db_connection()
     cursor = conn.cursor()
     conn.execute("PRAGMA journal_mode = WAL")

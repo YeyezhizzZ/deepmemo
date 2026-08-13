@@ -1,7 +1,8 @@
 from __future__ import annotations
 
+import uuid
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from src.app.database import connection_scope
@@ -13,6 +14,10 @@ class ScopeNotFoundError(LookupError):
 
 
 class ScopeNotReadyError(RuntimeError):
+    pass
+
+
+class ScopeExpiredError(RuntimeError):
     pass
 
 
@@ -71,9 +76,86 @@ class ScopeRegistry:
 
     def require_access(self, scope_id: str, owner_key: str | None) -> KnowledgeScope:
         scope = self.get_scope(scope_id)
+        if scope.status == "deleting":
+            raise ScopeNotFoundError(scope_id)
         if scope.scope_type == "temporary" and scope.owner_key != owner_key:
             raise ScopeNotFoundError(scope_id)
+        if (
+            scope.scope_type == "temporary"
+            and scope.expires_at
+            and scope.expires_at <= _now()
+        ):
+            raise ScopeExpiredError(scope_id)
         return scope
+
+    def create_temporary_scope(self, owner_key: str) -> KnowledgeScope:
+        scope_id = f"ws_{uuid.uuid4().hex}"
+        now = datetime.now(timezone.utc).replace(microsecond=0)
+        expires_at = now + timedelta(hours=self.settings.upload_ttl_hours)
+        with connection_scope() as conn:
+            conn.execute(
+                """
+                INSERT INTO knowledge_scope (
+                    scope_id, scope_type, owner_key, status, current_version,
+                    created_at, expires_at, deleted_at
+                )
+                VALUES (?, 'temporary', ?, 'empty', NULL, ?, ?, NULL)
+                """,
+                (
+                    scope_id,
+                    owner_key,
+                    now.isoformat(),
+                    expires_at.isoformat(),
+                ),
+            )
+        return self.get_scope(scope_id)
+
+    def set_status(self, scope_id: str, status: str) -> None:
+        with connection_scope() as conn:
+            conn.execute(
+                "UPDATE knowledge_scope SET status = ? WHERE scope_id = ?",
+                (status, scope_id),
+            )
+
+    def mark_deleting(self, scope_id: str, owner_key: str) -> KnowledgeScope:
+        scope = self.require_access(scope_id, owner_key)
+        if scope.scope_type != "temporary":
+            raise ScopeNotFoundError(scope_id)
+        with connection_scope() as conn:
+            conn.execute(
+                """
+                UPDATE knowledge_scope
+                SET status = 'deleting'
+                WHERE scope_id = ? AND owner_key = ?
+                """,
+                (scope_id, owner_key),
+            )
+        return self.get_scope(scope_id)
+
+    def mark_deleted(self, scope_id: str) -> None:
+        with connection_scope() as conn:
+            conn.execute(
+                """
+                UPDATE knowledge_scope
+                SET status = 'deleted', current_version = NULL, deleted_at = ?
+                WHERE scope_id = ?
+                """,
+                (_now(), scope_id),
+            )
+
+    def expired_temporary_scope_ids(self) -> list[str]:
+        with connection_scope() as conn:
+            rows = conn.execute(
+                """
+                SELECT scope_id FROM knowledge_scope
+                WHERE scope_type = 'temporary'
+                  AND status NOT IN ('deleting', 'deleted')
+                  AND expires_at IS NOT NULL
+                  AND expires_at <= ?
+                """,
+                (_now(),),
+            ).fetchall()
+        return [row["scope_id"] for row in rows]
 
     def register_public_version(
         self,
@@ -85,8 +167,30 @@ class ScopeRegistry:
         index_path: str | None = None,
         source_revision: str | None = None,
     ) -> ResolvedScope:
-        now = _now()
         self.ensure_public_scope()
+        return self.register_version(
+            scope_id=self.PUBLIC_SCOPE_ID,
+            version=version,
+            content_hash=content_hash,
+            documents_path=documents_path,
+            manifest_path=manifest_path,
+            index_path=index_path,
+            source_revision=source_revision,
+        )
+
+    def register_version(
+        self,
+        *,
+        scope_id: str,
+        version: str,
+        content_hash: str,
+        documents_path: str,
+        manifest_path: str,
+        index_path: str | None = None,
+        source_revision: str | None = None,
+    ) -> ResolvedScope:
+        now = _now()
+        scope = self.get_scope(scope_id)
         with connection_scope() as conn:
             conn.execute(
                 """
@@ -97,7 +201,7 @@ class ScopeRegistry:
                 VALUES (?, ?, ?, ?, ?, ?, 'ready', ?, ?, ?)
                 """,
                 (
-                    self.PUBLIC_SCOPE_ID,
+                    scope_id,
                     version,
                     content_hash,
                     documents_path,
@@ -114,9 +218,9 @@ class ScopeRegistry:
                 SET status = 'ready', current_version = ?, deleted_at = NULL
                 WHERE scope_id = ?
                 """,
-                (version, self.PUBLIC_SCOPE_ID),
+                (version, scope_id),
             )
-        return self.resolve(self.PUBLIC_SCOPE_ID)
+        return self.resolve(scope_id, scope.owner_key)
 
     def resolve(self, scope_id: str, owner_key: str | None = None) -> ResolvedScope:
         scope = self.require_access(scope_id, owner_key)

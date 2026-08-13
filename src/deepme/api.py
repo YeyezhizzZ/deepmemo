@@ -1,18 +1,26 @@
 from __future__ import annotations
 
 import json
+import hashlib
+import re
 import uuid
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 from typing import Literal
 
-from fastapi import APIRouter, HTTPException, Request, Response
+from fastapi import APIRouter, File, HTTPException, Request, Response, UploadFile
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, ConfigDict, Field
 
 from src.app.database import connection_scope
 from src.deepme.public_knowledge import PublicKnowledgeBuildError
+from src.deepme.rate_limit import RateLimitExceeded
 from src.deepme.runtime import get_runtime
-from src.deepme.scopes import ScopeNotFoundError, ScopeNotReadyError
+from src.deepme.scopes import (
+    ScopeExpiredError,
+    ScopeNotFoundError,
+    ScopeNotReadyError,
+)
 
 
 router = APIRouter(prefix="/api/v1", tags=["deepme-v1"])
@@ -72,14 +80,44 @@ class CitationResponse(BaseModel):
     scope_id: str
     knowledge_version: str
     file_path: str
+    display_name: str | None = None
+    source_type: str = "markdown"
     start_line: int
     end_line: int
+    page_start: int | None = None
+    page_end: int | None = None
+    content_hash: str | None = None
     content: str
 
 
 class MessageCitationsResponse(BaseModel):
     message_id: str
     citations: list[CitationResponse]
+
+
+class WorkspaceFileResponse(BaseModel):
+    file_id: str
+    original_name: str
+    content_type: str
+    byte_size: int
+    sha256: str
+    status: str
+    error_code: str | None = None
+
+
+class WorkspaceResponse(BaseModel):
+    workspace_id: str
+    scope_id: str
+    status: str
+    knowledge_version: str | None = None
+    expires_at: str
+    files: list[WorkspaceFileResponse] = Field(default_factory=list)
+
+
+class UploadResponse(BaseModel):
+    workspace_id: str
+    status: str
+    file_ids: list[str]
 
 
 @router.get("/site", response_model=SiteResponse)
@@ -119,17 +157,224 @@ def readiness():
     }
 
 
+@router.post("/workspaces", response_model=WorkspaceResponse)
+def create_workspace(request: Request, response: Response):
+    runtime = get_runtime()
+    if not runtime.settings.upload_enabled:
+        raise HTTPException(status_code=404, detail={"code": "upload_disabled"})
+    owner = runtime.identity.resolve(request, response)
+    scope = runtime.workspaces.create(owner.owner_key)
+    return _workspace_response(scope, [])
+
+
+@router.get("/workspaces/{workspace_id}", response_model=WorkspaceResponse)
+def get_workspace(workspace_id: str, request: Request):
+    owner_key = _require_owner(request)
+    runtime = get_runtime()
+    try:
+        scope = runtime.registry.require_access(workspace_id, owner_key)
+    except ScopeExpiredError as exc:
+        raise HTTPException(status_code=410, detail={"code": "scope_expired"}) from exc
+    except ScopeNotFoundError as exc:
+        raise _scope_not_found() from exc
+    return _workspace_response(
+        scope,
+        runtime.workspaces.list_files(workspace_id),
+    )
+
+
+@router.post(
+    "/workspaces/{workspace_id}/files",
+    response_model=UploadResponse,
+    status_code=202,
+)
+async def upload_workspace_files(
+    workspace_id: str,
+    request: Request,
+    files: list[UploadFile] = File(...),
+):
+    owner_key = _require_owner(request)
+    runtime = get_runtime()
+    _check_rate_limit(
+        "upload",
+        owner_key,
+        limit=runtime.settings.upload_rate_limit_per_hour,
+        window_seconds=3600,
+    )
+    try:
+        scope = runtime.registry.require_access(workspace_id, owner_key)
+    except ScopeExpiredError as exc:
+        raise HTTPException(status_code=410, detail={"code": "scope_expired"}) from exc
+    except ScopeNotFoundError as exc:
+        raise _scope_not_found() from exc
+    if scope.scope_type != "temporary" or scope.status in {"deleting", "deleted"}:
+        raise _scope_not_found()
+    if not files:
+        raise HTTPException(status_code=422, detail={"code": "no_files"})
+
+    existing = runtime.workspaces.list_files(workspace_id)
+    if len(existing) + len(files) > runtime.settings.upload_max_files:
+        raise HTTPException(
+            status_code=413,
+            detail={"code": "upload_limit_exceeded"},
+        )
+    existing_bytes = sum(int(item["byte_size"]) for item in existing)
+    staged: list[dict] = []
+    created_paths: list[Path] = []
+    upload_dir = runtime.workspaces.workspace_root(workspace_id) / "uploads"
+    upload_dir.mkdir(parents=True, exist_ok=True)
+    try:
+        running_total = existing_bytes
+        for upload in files:
+            original_name = Path(upload.filename or "upload").name
+            extension = Path(original_name).suffix.lower()
+            if extension not in {".md", ".txt", ".pdf"}:
+                raise HTTPException(
+                    status_code=415,
+                    detail={"code": "unsupported_file", "file": original_name},
+                )
+            stored_name = f"{uuid.uuid4().hex}.upload"
+            path = upload_dir / stored_name
+            created_paths.append(path)
+            digest = hashlib.sha256()
+            byte_size = 0
+            prefix = b""
+            with path.open("wb") as handle:
+                while chunk := await upload.read(64 * 1024):
+                    if not prefix:
+                        prefix = chunk[:8]
+                    byte_size += len(chunk)
+                    running_total += len(chunk)
+                    if (
+                        byte_size > runtime.settings.upload_max_file_bytes
+                        or running_total > runtime.settings.upload_max_bytes
+                    ):
+                        raise HTTPException(
+                            status_code=413,
+                            detail={"code": "upload_limit_exceeded"},
+                        )
+                    digest.update(chunk)
+                    handle.write(chunk)
+            if extension == ".pdf" and not prefix.startswith(b"%PDF-"):
+                raise HTTPException(
+                    status_code=415,
+                    detail={"code": "unsupported_file", "file": original_name},
+                )
+            staged.append(
+                {
+                    "path": path,
+                    "stored_name": stored_name,
+                    "original_name": original_name,
+                    "content_type": upload.content_type or "application/octet-stream",
+                    "byte_size": byte_size,
+                    "sha256": digest.hexdigest(),
+                }
+            )
+    except Exception:
+        for path in created_paths:
+            path.unlink(missing_ok=True)
+        raise
+    finally:
+        for upload in files:
+            await upload.close()
+
+    file_ids = [
+        runtime.workspaces.register_upload(
+            scope_id=workspace_id,
+            original_name=item["original_name"],
+            content_type=item["content_type"],
+            byte_size=item["byte_size"],
+            sha256=item["sha256"],
+            stored_name=item["stored_name"],
+        )
+        for item in staged
+    ]
+    return UploadResponse(
+        workspace_id=workspace_id,
+        status="processing",
+        file_ids=file_ids,
+    )
+
+
+@router.delete("/workspaces/{workspace_id}", status_code=202)
+def delete_workspace(workspace_id: str, request: Request):
+    owner_key = _require_owner(request)
+    runtime = get_runtime()
+    try:
+        runtime.registry.mark_deleting(workspace_id, owner_key)
+    except ScopeExpiredError:
+        with connection_scope() as conn:
+            row = conn.execute(
+                """
+                SELECT scope_id FROM knowledge_scope
+                WHERE scope_id = ? AND owner_key = ?
+                """,
+                (workspace_id, owner_key),
+            ).fetchone()
+            if not row:
+                raise _scope_not_found()
+            conn.execute(
+                "UPDATE knowledge_scope SET status = 'deleting' WHERE scope_id = ?",
+                (workspace_id,),
+            )
+    except ScopeNotFoundError as exc:
+        raise _scope_not_found() from exc
+    runtime.jobs.enqueue(
+        "delete_scope",
+        scope_id=workspace_id,
+        deduplicate=True,
+    )
+    return {"workspace_id": workspace_id, "status": "deleting"}
+
+
+@router.get("/workspaces/{workspace_id}/deletion")
+def get_workspace_deletion(workspace_id: str, request: Request):
+    owner_key = _require_owner(request)
+    with connection_scope() as conn:
+        row = conn.execute(
+            """
+            SELECT status, deleted_at FROM knowledge_scope
+            WHERE scope_id = ? AND owner_key = ?
+            """,
+            (workspace_id, owner_key),
+        ).fetchone()
+    if not row:
+        raise _scope_not_found()
+    return {
+        "workspace_id": workspace_id,
+        "status": row["status"],
+        "deleted_at": row["deleted_at"],
+    }
+
+
 @router.post("/sessions", response_model=SessionResponse)
 def create_session(data: SessionCreateRequest, request: Request, response: Response):
-    if data.mode != "system" or data.workspace_id is not None:
-        raise HTTPException(
-            status_code=400,
-            detail={"code": "temporary_workspace_not_implemented"},
-        )
-
     runtime = get_runtime()
     owner = runtime.identity.resolve(request, response)
-    scope = _ensure_public_scope()
+    if data.mode == "system":
+        if data.workspace_id is not None:
+            raise HTTPException(status_code=422, detail={"code": "invalid_workspace"})
+        scope = _ensure_public_scope()
+    else:
+        if not data.workspace_id:
+            raise HTTPException(status_code=422, detail={"code": "workspace_required"})
+        try:
+            temporary = runtime.registry.require_access(
+                data.workspace_id,
+                owner.owner_key,
+            )
+        except ScopeExpiredError as exc:
+            raise HTTPException(
+                status_code=410,
+                detail={"code": "scope_expired"},
+            ) from exc
+        except ScopeNotFoundError as exc:
+            raise _scope_not_found() from exc
+        if temporary.scope_type != "temporary":
+            raise _scope_not_found()
+        if temporary.status != "ready" or not temporary.current_version:
+            raise HTTPException(status_code=409, detail={"code": "scope_not_ready"})
+        scope = runtime.registry.resolve(temporary.scope_id, owner.owner_key)
     session_id = str(uuid.uuid4())
     now = _now()
     expires_at = (
@@ -175,14 +420,17 @@ def list_sessions(request: Request, response: Response):
     with connection_scope() as conn:
         rows = conn.execute(
             """
-            SELECT s.*, ks.scope_type, ks.current_version
+            SELECT s.*, ks.scope_type, ks.current_version,
+                   ks.status AS scope_status, ks.expires_at AS scope_expires_at
             FROM session s
             JOIN knowledge_scope ks ON ks.scope_id = s.scope_id
             WHERE s.owner_key = ?
               AND (s.expires_at IS NULL OR s.expires_at > ?)
+              AND ks.status NOT IN ('deleting', 'deleted')
+              AND (ks.expires_at IS NULL OR ks.expires_at > ?)
             ORDER BY s.updated_at DESC
             """,
-            (owner.owner_key, now),
+            (owner.owner_key, now, now),
         ).fetchall()
     return [_session_response(row) for row in rows]
 
@@ -212,12 +460,20 @@ def delete_session(session_id: str, request: Request):
 @router.post("/chat/stream")
 def chat_stream(data: ChatRequest, request: Request):
     owner_key = _require_owner(request)
-    session = _require_session(data.session_id, owner_key)
     runtime = get_runtime()
+    _check_rate_limit(
+        "chat",
+        owner_key,
+        limit=runtime.settings.chat_rate_limit_per_minute,
+        window_seconds=60,
+    )
+    session = _require_session(data.session_id, owner_key)
     try:
         scope = runtime.registry.resolve(session["scope_id"], owner_key)
     except ScopeNotFoundError as exc:
         raise _scope_not_found() from exc
+    except ScopeExpiredError as exc:
+        raise HTTPException(status_code=410, detail={"code": "scope_expired"}) from exc
     except ScopeNotReadyError as exc:
         raise HTTPException(
             status_code=409,
@@ -239,7 +495,7 @@ def chat_stream(data: ChatRequest, request: Request):
     _append_message_id(data.session_id, user_message_id)
     qa_service = runtime.qa_factory.create(scope)
 
-    def event_generator():
+    async def event_generator():
         yield _sse(
             "meta",
             {
@@ -252,10 +508,20 @@ def chat_stream(data: ChatRequest, request: Request):
         try:
             answer = qa_service.answer_stream(data.user_message, history=history)
             for chunk in answer.chunks:
+                if await request.is_disconnected():
+                    return
                 if not chunk:
                     continue
                 full_content += chunk
                 yield _sse("token", {"content": chunk})
+
+            if answer.local_result.evidence and not _has_valid_citation(
+                full_content,
+                len(answer.local_result.evidence),
+            ):
+                citation_suffix = "\n\n参考 [1]"
+                full_content += citation_suffix
+                yield _sse("token", {"content": citation_suffix})
 
             answer_status = (
                 "grounded" if answer.local_result.evidence else "insufficient_evidence"
@@ -315,9 +581,13 @@ def get_message_citations(message_id: str, request: Request):
             SELECT m.message_id, m.citations
             FROM message m
             JOIN session s ON s.session_id = m.session_id
-            WHERE m.message_id = ? AND s.owner_key = ?
+            JOIN knowledge_scope ks ON ks.scope_id = s.scope_id
+            WHERE m.message_id = ?
+              AND s.owner_key = ?
+              AND ks.status NOT IN ('deleting', 'deleted')
+              AND (ks.expires_at IS NULL OR ks.expires_at > ?)
             """,
-            (message_id, owner_key),
+            (message_id, owner_key, _now()),
         ).fetchone()
     if not row:
         raise _scope_not_found()
@@ -358,7 +628,8 @@ def _require_session(session_id: str, owner_key: str):
     with connection_scope() as conn:
         row = conn.execute(
             """
-            SELECT s.*, ks.scope_type, ks.current_version
+            SELECT s.*, ks.scope_type, ks.current_version,
+                   ks.status AS scope_status, ks.expires_at AS scope_expires_at
             FROM session s
             JOIN knowledge_scope ks ON ks.scope_id = s.scope_id
             WHERE s.session_id = ? AND s.owner_key = ?
@@ -367,6 +638,10 @@ def _require_session(session_id: str, owner_key: str):
         ).fetchone()
     if not row:
         raise _scope_not_found()
+    if row["scope_status"] in {"deleting", "deleted"}:
+        raise _scope_not_found()
+    if row["scope_expires_at"] and row["scope_expires_at"] <= _now():
+        raise HTTPException(status_code=410, detail={"code": "scope_expired"})
     if row["expires_at"] and row["expires_at"] <= _now():
         raise HTTPException(status_code=410, detail={"code": "session_expired"})
     return row
@@ -453,8 +728,13 @@ def _build_citations(evidence, *, scope_id: str, knowledge_version: str) -> list
             "scope_id": scope_id,
             "knowledge_version": knowledge_version,
             "file_path": item.path,
+            "display_name": item.display_name,
+            "source_type": item.source_type,
             "start_line": item.start_line,
             "end_line": item.end_line,
+            "page_start": item.page_start,
+            "page_end": item.page_end,
+            "content_hash": item.content_hash,
             "content": item.excerpt,
         }
         for index, item in enumerate(evidence, start=1)
@@ -499,12 +779,62 @@ def _message_response(row) -> MessageResponse:
     )
 
 
+def _workspace_response(scope, files: list[dict]) -> WorkspaceResponse:
+    return WorkspaceResponse(
+        workspace_id=scope.scope_id,
+        scope_id=scope.scope_id,
+        status=scope.status,
+        knowledge_version=scope.current_version,
+        expires_at=scope.expires_at,
+        files=[
+            WorkspaceFileResponse(
+                file_id=item["file_id"],
+                original_name=item["original_name"],
+                content_type=item["content_type"],
+                byte_size=int(item["byte_size"]),
+                sha256=item["sha256"],
+                status=item["parse_status"],
+                error_code=item["error_code"],
+            )
+            for item in files
+        ],
+    )
+
+
 def _sse(event: str, payload: dict) -> str:
     return f"event: {event}\ndata: {json.dumps(payload, ensure_ascii=False)}\n\n"
 
 
+def _has_valid_citation(content: str, evidence_count: int) -> bool:
+    return any(
+        1 <= int(value) <= evidence_count
+        for value in re.findall(r"\[(\d+)\]", content)
+    )
+
+
 def _scope_not_found() -> HTTPException:
     return HTTPException(status_code=404, detail={"code": "scope_not_found"})
+
+
+def _check_rate_limit(
+    bucket: str,
+    owner_key: str,
+    *,
+    limit: int,
+    window_seconds: int,
+) -> None:
+    try:
+        get_runtime().rate_limiter.check(
+            bucket,
+            owner_key,
+            limit=limit,
+            window_seconds=window_seconds,
+        )
+    except RateLimitExceeded as exc:
+        raise HTTPException(
+            status_code=429,
+            detail={"code": "rate_limited"},
+        ) from exc
 
 
 def _now() -> str:

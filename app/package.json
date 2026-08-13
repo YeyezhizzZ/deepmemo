@@ -4,10 +4,7 @@
   "version": "0.6.0",
   "type": "module",
   "scripts": {
-    "prepare:vditor": "node scripts/prepare-vditor.mjs",
-    "predev": "npm run prepare:vditor",
     "dev": "vite",
-    "prebuild": "npm run prepare:vditor",
     "build": "tsc -b && vite build",
     "test:browser": "uv run --project .. python ../scripts/run_browser_tests.py",
     "test:browser:run": "playwright test",

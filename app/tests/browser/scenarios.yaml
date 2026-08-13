@@ -1,156 +1,58 @@
 scenarios:
-  - id: smoke-open-app
-    name: 打开应用并切换工作区
-    area: app
+  - id: deepme-public-home
+    name: 打开 DeepMe 公开问答首页
+    area: public-chat
     priority: high
     status: active
     dataset: smoke_basic
-    intent: 打开应用后，左侧文件树和模式切换能正常渲染。
+    intent: 访客看到作者公开知识库、推荐问题和提问输入框。
     steps:
-      - click:
-          role: button
-          name: Knowledge
       - assert_visible:
-          label: Knowledge view
-      - click:
-          role: button
-          name: 编辑器模式
+          label: DeepMe 首页
       - assert_visible:
-          label: data 文件树
+          label: 当前知识来源
+      - assert_visible:
+          label: 提问输入框
     asserts:
       - visible:
-          label: data 文件树
+          label: 问答模式
 
-  - id: editor-open-edit-save
-    name: 打开文件并保存 Markdown
-    area: editor
+  - id: deepme-public-question
+    name: 基于公开知识库发送问题
+    area: public-chat
     priority: high
     status: active
     dataset: smoke_basic
-    intent: 用户打开一个 Markdown 文件，修改内容并保存，刷新后内容仍然存在。
-    preconditions:
-      - file: diary/0527.md
+    intent: 访客发送问题后看到流式问答记录。
     steps:
-      - type_editor:
-          text: |
-            # Updated
-            hello
-      - click:
-          role: button
-          name: 保存
-    asserts:
-      - file_contains:
-          path: diary/0527.md
-          text: "# Updated"
-
-  - id: editor-create-file-folder
-    name: 新建文件和文件夹
-    area: editor
-    priority: high
-    status: planned
-    dataset: editor_create
-    intent: 用户在文件树里新建 Markdown 文件和目录。
-    steps:
-      - click:
-          role: button
-          name: 新建文件
-      - click:
-          role: button
-          name: 新建文件夹
-    asserts:
-      - visible:
-          label: data 文件树
-
-  - id: editor-move-rename-file
-    name: 重命名或移动文件
-    area: editor
-    priority: high
-    status: planned
-    dataset: editor_move
-    intent: 用户把一个 Markdown 文件移动到新路径。
-    steps:
-      - select_file:
-          path: ideas/mock-note.md
-      - rename_file:
-          old_path: ideas/mock-note.md
-          new_path: diary/mock-note-renamed.md
-    asserts:
-      - file_exists:
-          path: diary/mock-note-renamed.md
-
-  - id: editor-upload-image
-    name: 上传图片并插入引用
-    area: editor
-    priority: high
-    status: planned
-    dataset: upload_asset
-    intent: 用户在 Markdown 中上传图片，得到可引用的资产路径。
-    steps:
-      - select_file:
-          path: ideas/mock-note.md
-      - upload_asset:
-          path: fixtures/image.png
-    asserts:
-      - visible:
-          label: Markdown
-
-  - id: chat-create-send-citation
-    name: 新建会话并发送带引用的问题
-    area: chat
-    priority: high
-    status: planned
-    dataset: chat_citations
-    intent: 用户在问答模式中发送消息，得到可追溯 citation。
-    steps:
-      - click:
-          role: button
-          name: 问答模式
-      - click:
-          role: button
-          name: 新建
       - type_input:
-          value: 请总结这份笔记
+          value: DeepMemo 是什么
       - click:
           role: button
           name: 发送
+      - assert_visible:
+          label: 问答记录
     asserts:
       - visible:
-          label: 引用来源
+          label: 问答记录
 
-  - id: chat-file-references-trace
-    name: 从文件反查会话引用
-    area: chat
+  - id: deepme-upload-files
+    name: 上传自己的知识文件
+    area: temporary-workspace
     priority: high
-    status: planned
-    dataset: chat_citations
-    intent: 用户从文件路径反查哪些会话引用了该文件。
+    status: active
+    dataset: smoke_basic
+    intent: 访客切换上传模式，上传 Markdown 并看到文件处理状态。
     steps:
       - click:
           role: button
-          name: 问答模式
-      - open_file_references:
-          path: diary/0527.md
+          name: 问你的资料
+      - upload_knowledge:
+          path: fixtures/smoke_basic/data/ideas/mock-note.md
+      - assert_visible:
+          label: 已上传文件
+      - assert_visible:
+          testId: workspace-ready
     asserts:
       - visible:
-          label: 引用来源
-
-  - id: wiki-open-search-select-rebuild
-    name: 打开 Wiki、搜索并重建
-    area: wiki
-    priority: high
-    status: planned
-    dataset: wiki_basic
-    intent: 用户浏览 Wiki 页面、搜索内容并触发重建。
-    steps:
-      - click:
-          role: button
-          name: Knowledge
-      - fill:
-          placeholder: 搜索 Wiki 页面
-          value: agentic testing
-      - click:
-          role: button
-          name: 重建 Wiki
-    asserts:
-      - visible:
-          label: Knowledge view
+          label: 当前知识来源
